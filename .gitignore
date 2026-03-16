@@ -1,0 +1,5 @@
+*.iso
+.cursor/
+# Binaires Rainfall (ne pas versionner)
+level*/level*.bin
+level*/*.bin

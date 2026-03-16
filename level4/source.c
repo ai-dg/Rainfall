@@ -1,0 +1,30 @@
+/*
+ * Reconstruction level4 (Rainfall).
+ * p() : printf(arg) → format string. n() : fgets puis p(buffer), puis si m == 0x1025544 → system("/bin/cat /home/user/level5/.pass").
+ */
+
+#include <stdio.h>
+
+int m;  /* global @ 0x8049810 */
+
+void p(char *s)
+{
+	printf(s);  /* format string */
+}
+
+void n(void)
+{
+	char buf[512];
+
+	fgets(buf, 512, stdin);
+	p(buf);
+	if (m == 0x1025544) {
+		system("/bin/cat /home/user/level5/.pass");
+	}
+}
+
+int main(void)
+{
+	n();
+	return 0;
+}
