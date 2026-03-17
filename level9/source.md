@@ -6,8 +6,8 @@ Voir `source.c` (équivalent C simplifié).
 
 - Classe **N** : vtable à +0, buffer d’annotation à +4 (100 octets), int à +0x68.
 - **setAnnotation** : **memcpy(this+4, src, strlen(src))** sans limite.
-- **main** : deux objets N, **setAnnotation(premier, argv[1])**, puis appel de la fonction virtuelle sur le second avec (second, premier).
+- **main** : deux N, **setAnnotation(premier, argv[1])**, puis **(*(second->vptr))(second, first)**.
 
 ## Vulnérabilité
 
-**Overflow** : en passant un **argv[1]** long, on dépasse le buffer du premier objet et on écrase le **vptr** du second. En mettant **premier+4** dans ce vptr et l’adresse de **system** à **premier+4**, l’appel devient **system(second)** ; il faut encore fournir un argument valide (pointeur vers "/bin/sh") via la disposition mémoire ou un gadget.
+**Overflow** : un **argv[1]** long dépasse le buffer du premier et écrase le **vptr** du second (offset **108**). En mettant **premier+4** dans ce vptr, l’appel exécute ***(premier+4)**. En plaçant à **premier+4** l’adresse d’un shellcode (ex. en variable d’environnement), on exécute ce shellcode → shell bonus0.

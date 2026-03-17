@@ -2,7 +2,7 @@
 
 ## Binaire
 
-- C++ (level9.cpp), setuid **bonus0**. Pas de **system** ni "/bin/sh" dans le binaire → **ret2libc**.
+- C++ (level9.cpp), setuid **bonus0**. Pas d’appel à **system** ni chaîne "/bin/sh" dans le binaire.
 - Imports : memcpy, strlen, _Znwj (operator new), _exit.
 
 ## Classe N (demanglée)
@@ -13,32 +13,37 @@
 
 ## main
 
-- argc &gt; 1 sinon exit(1).
-- **malloc(0x6c)** → premier N(5), **malloc(0x6c)** → second N(6).
-- **setAnnotation(premier, argv[1])** : copie argv[1] à partir de premier+4 → on peut dépasser et écrire dans le second objet.
+- argc > 1 sinon _exit(1).
+- **operator new(0x6c)** → premier N(5), **operator new(0x6c)** → second N(6).
+- **setAnnotation(premier, argv[1])** : copie argv[1] à partir de **premier+4** → on peut dépasser et écrire dans le second objet.
 - Appel virtuel : `(*(second->vptr))(second, first)` → on contrôle **second->vptr** via l’overflow.
+
+Séquence utile en GDB (main) :
+- main+136 : mov eax, [esp+0x10] (eax = second)
+- main+140 : mov eax, [eax] (eax = second->vptr)
+- main+142 : mov edx, [eax] (edx = *vptr = cible du call)
+- main+159 : call edx
 
 ## Layout
 
-- Premier objet : [vptr 4][annotation 100 octets][int 4] = 0x6c octets. L’annotation va de +4 à +0x68.
-- Second objet juste après (à premier+0x6c) : [vptr 4][…].
-- Overflow : 104 octets (100 + 4 du int) pour atteindre le **vptr** du second. En écrivant **premier+4** dans ce vptr, l’appel lit ***(premier+4)** = adresse à mettre dans le payload (ex. **system**). L’appel devient **system(second)** ; il faut donc que **(second)** soit la chaîne **"/bin/sh"**.
+- Premier objet : [vptr 4][annotation 100][int 4] = 0x6c octets. L’annotation va de +4 à +0x68.
+- Second objet juste après (premier+0x6c) : [vptr 4][…].
+- **Overflow** : **108 octets** (4 + 100 + 4) pour atteindre et écraser le **vptr** du second. En mettant **premier+4** (ex. 0x0804a00c) dans ce vptr, l’appel lit ***(premier+4)** et saute à cette valeur.
 
-## Problème
+## Solution retenue : shellcode dans l’environnement
 
-- Si on met vptr = premier+4 et *(premier+4) = system, on appelle **system(second)**. Pour que ça lance un shell, il faudrait que l’adresse **(second)** contienne "/bin/sh". Les premiers octets de **second** sont justement le vptr (premier+4), pas la chaîne.
-- Solutions possibles : **ret2libc** avec **system** et adresse de "/bin/sh" (dans libc ou env), ou **gadget** qui fait system(second+4) si on met "/bin/sh" à second+4. Adresses à obtenir en **gdb** (heap, system, éventuellement gadget ou "/bin/sh").
+- À **offset 0** (premier+4) : on met l’**adresse du shellcode** (nopsled + execve("/bin/sh") dans une variable d’env).
+- À **offset 108** (second->vptr) : on met **premier+4**.
+- Au moment du `call edx`, le programme exécute donc ***(premier+4)** = l’adresse lue à premier+4 = notre adresse env → exécution du shellcode → shell bonus0.
 
-## Exploit (schéma)
+Pas besoin de ret2libc ni de gadget : on redirige le flux vers du code qu’on contrôle en env.
 
-1. Trouver en gdb : adresse du **premier** objet (heap), **system** (libc), et si besoin "/bin/sh" ou un gadget.
-2. Payload : **[system]** (4 B) + **padding** jusqu’à offset 104 + **[premier+4]** (nouveau vptr du second).
-3. Pour que **system** reçoive "/bin/sh", il faut soit placer "/bin/sh" en début de second (alors vptr ne peut pas être premier+4), soit utiliser un gadget qui appelle system avec un argument lu depuis le payload (ex. premier+8 si "/bin/sh" y est).
+## Adresses utiles (exemple VM)
 
-## Adresses utiles
+| Élément        | Valeur      |
+|----------------|-------------|
+| premier+4      | 0x0804a00c  |
+| Vtable N       | 0x8048848   |
+| setAnnotation  | 0x804870e   |
 
-| Élément   | Valeur      |
-|----------|-------------|
-| Vtable N | 0x8048848   |
-| operator+ | 0x804873a  |
-| setAnnotation | 0x804870e |
+L’adresse du shellcode (nopsled dans `payload=...`) se trouve via `x/s environ` en GDB après `env -i payload=... ./level9`.

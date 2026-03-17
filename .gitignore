@@ -3,3 +3,5 @@
 # Binaires Rainfall (ne pas versionner)
 level*/level*.bin
 level*/*.bin
+bonus0/*.bin
+bonus1/*.bin
