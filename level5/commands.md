@@ -22,6 +22,8 @@ readelf -h level5
 Extraction (depuis l’hôte) :  
 `sshpass -p '<level5_password>' scp -o StrictHostKeyChecking=no -P 4242 level5@localhost:level5 ./level5.bin`
 
+`scp -P 4242 level5@localhost:level5 ./level5`
+
 Voir `analysis.md`.
 
 ---

