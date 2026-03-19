@@ -5,3 +5,4 @@ level*/level*.bin
 level*/*.bin
 bonus0/*.bin
 bonus1/*.bin
+*.bin
