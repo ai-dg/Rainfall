@@ -1,33 +1,33 @@
 # Endianness (little-endian)
 
 ## Concept
-L’**endianness** définit l’ordre des octets en mémoire pour un mot multi-octets. En **little-endian** (x86), l’octet de **poids faible** est à l’adresse la plus basse.
+**Endianness** defines the byte order in memory for a multi-byte word. In **little-endian** (x86), the **low** byte is at the lowest address.
 
-## Définition simple
-- Adresse 0x08048454 stockée sur 4 octets :
-  - En mémoire (LE) : `54 84 04 08` (low byte first).
-  - En Python pour un payload : `\x54\x84\x04\x08`. (`\x54` = un octet de valeur 0x54 ; permet d’écrire des octets bruts.)
+## Simple definition
+- Address 0x08048454 stored in 4 bytes:
+  - In memory (LE): `54 84 04 08` (low byte first).
+  - In Python for a payload: `\x54\x84\x04\x08`. (`\x54` = one byte of value 0x54; allows writing raw bytes.)
 
-## Où ça apparaît (level6 et autres)
-- L’adresse de `n` est **0x08048454**.
-- On l’écrit dans le heap via strcpy : les octets doivent être dans l’ordre **little-endian** pour que le CPU l’interprète correctement au `call *ptr`.
+## Where it appears (level6 and others)
+- The address of `n` is **0x08048454**.
+- We write it into the heap via strcpy: bytes must be in **little-endian** order so the CPU interprets it correctly at `call *ptr`.
 
-## Tableau
+## Table
 
-| Valeur (hex)   | Octets (LE) en mémoire | En Python        |
-|---------------|------------------------|------------------|
-| 0x08048454    | 54 84 04 08            | \x54\x84\x04\x08 |
-| 0x8049838     | 38 98 04 08            | \x38\x98\x04\x08 |
+| Value (hex)   | Bytes (LE) in memory | In Python        |
+|---------------|----------------------|------------------|
+| 0x08048454    | 54 84 04 08          | \x54\x84\x04\x08 |
+| 0x8049838     | 38 98 04 08          | \x38\x98\x04\x08 |
 
-## Utilité en exploitation
-- Tout payload qui écrit une adresse (GOT, pointeur de fonction, vptr, etc.) doit utiliser le **bon ordre** pour l’architecture cible (i386 = LE).
+## Use in exploitation
+- Any payload that writes an address (GOT, function pointer, vptr, etc.) must use the **correct order** for the target architecture (i386 = LE).
 
-## Exemple level6
-- Adresse de **n** : 0x08048454.
-- Payload : `"A"*72 + "\x54\x84\x04\x08"` pour que les 4 derniers octets forment la valeur 0x08048454 en lecture little-endian.
+## Level6 example
+- Address of **n**: 0x08048454.
+- Payload: `"A"*72 + "\x54\x84\x04\x08"` so the last 4 bytes form the value 0x08048454 when read in little-endian.
 
-## Résumé mental
-Little-endian = octet de poids faible en premier. Adresses dans les payloads = toujours en LE sur x86.
+## Mental summary
+Little-endian = low byte first. Addresses in payloads = always LE on x86.
 
-## Références
-- `htonl(3)` / `ntohl(3)` (ordre d’octets et conversion) : https://man7.org/linux/man-pages/man3/htonl.3.html
+## References
+- `htonl(3)` / `ntohl(3)` (byte order and conversion): https://man7.org/linux/man-pages/man3/htonl.3.html

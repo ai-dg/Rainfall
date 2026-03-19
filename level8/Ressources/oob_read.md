@@ -1,20 +1,20 @@
 # Level8 — Out-of-Bounds Read & Heap Layout Manipulation
 
-## Objectif
+## Objective
 
-Exploiter une **lecture hors limites (out-of-bounds read)** sur le heap en manipulant le **layout mémoire** : le programme lit à une adresse qu’il ne devrait pas ; cette adresse tombe dans une zone qu’on contrôle via une autre allocation.
+Exploit an **out-of-bounds read** on the heap by manipulating **memory layout**: the program reads at an address it shouldn't; that address falls in a region we control via another allocation.
 
-## Concept principal
+## Main concept
 
-Contrairement aux niveaux précédents :
+Unlike previous levels:
 
-- Pas d’écrasement d’adresse (pas de control flow direct type ret ou GOT).
-- Pas de shellcode.
-- Pas de GOT overwrite.
+- No address overwrite (no direct control flow like ret or GOT).
+- No shellcode.
+- No GOT overwrite.
 
-Ici : **on contrôle ce que le programme lit en mémoire**, pas ce qu’il écrit.
+Here: **we control what the program reads in memory**, not what it writes.
 
-## Vulnérabilité (logique)
+## Vulnerability (logical)
 
 ```c
 auth = malloc(4);
@@ -23,130 +23,130 @@ if (*(auth + 0x20))
     system("/bin/sh");
 ```
 
-- **auth** = 4 octets alloués.
-- Le programme lit **auth + 0x20** = **auth + 32** octets.
-- Donc lecture **en dehors** du buffer auth → **out-of-bounds read**.
+- **auth** = 4 bytes allocated.
+- The program reads **auth + 0x20** = **auth + 32** bytes.
+- So read **outside** the auth buffer → **out-of-bounds read**.
 
-## Organisation du heap
+## Heap organisation
 
-Mémoire **contiguë** en chunks :
+**Contiguous** memory in chunks:
 
 ```
 [ metadata ][ auth (4 bytes) ][ metadata ][ service (N bytes) ]
 ```
 
-Si **service** est alloué juste après **auth**, alors **auth + 0x20** peut tomber **dans** le bloc service.
+If **service** is allocated right after **auth**, then **auth + 0x20** can fall **inside** the service block.
 
-## Idée de l’attaque
+## Attack idea
 
-- `auth AAAA` → alloue auth (4 octets).
-- `service AAAA...` → alloue un bloc rempli de caractères non nuls.
-- `login` → lit `*(auth + 0x20)`.
+- `auth AAAA` → allocates auth (4 bytes).
+- `service AAAA...` → allocates a block filled with non-zero characters.
+- `login` → reads `*(auth + 0x20)`.
 
-Si auth+0x20 tombe dans les données de service, la valeur lue est celle qu’on a mise (ex. `'A'` = 0x41). Donc `*(auth+0x20) != 0` → condition vraie → shell.
+If auth+0x20 falls in service data, the value read is what we put (e.g. `'A'` = 0x41). So `*(auth+0x20) != 0` → condition true → shell.
 
-## Résultat
+## Result
 
 ```
 *(auth + 0x20) = 0x41 ('A')
 → if (0x41 != 0) → TRUE → system("/bin/sh")
 ```
 
-## Type d’attaque
+## Attack type
 
 | Type                        | Level8 |
 | --------------------------- |--------|
-| Heap overflow               | Non    |
-| Function pointer overwrite  | Non    |
-| **Out-of-bounds read**      | Oui    |
-| **Heap layout manipulation**| Oui    |
-| Logic bug exploitation      | Oui    |
+| Heap overflow               | No     |
+| Function pointer overwrite  | No     |
+| **Out-of-bounds read**      | Yes    |
+| **Heap layout manipulation**| Yes    |
+| Logic bug exploitation      | Yes    |
 
-**Concept clé :** le bug n’est pas dans l’**écriture**, il est dans la **lecture hors limites**.
+**Key concept:** the bug is not in **writing**, it's in **reading out of bounds**.
 
-## Layout mémoire (glibc 32 bits)
+## Memory layout (glibc 32-bit)
 
-Même avec `malloc(4)`, le chunk a un **header** (métadonnées) et un alignement :
+Even with `malloc(4)`, the chunk has a **header** (metadata) and alignment:
 
-| Élément    | Taille   |
+| Element    | Size     |
 | ---------- | -------- |
 | Header     | 8 bytes  |
-| Data (alignée) | 8 bytes  |
+| Data (aligned) | 8 bytes  |
 | Total chunk| 16 bytes |
 
 ```
 [ prev_size ][ size ][ data (8 bytes) ]
                 ↑
-              auth pointe ici (données utilisateur)
+              auth points here (user data)
 ```
 
-Donc `malloc(4)` n’occupe pas “4 octets seuls” mais un **chunk aligné**. L’adresse **auth + 32** peut donc tomber dans le chunk suivant (service).
+So `malloc(4)` doesn't use "4 bytes only" but an **aligned chunk**. Address **auth + 32** can therefore fall in the next chunk (service).
 
-## Allocation service
+## Service allocation
 
 ```c
 service = strdup(buf + 7);
 ```
 
-- `strdup` fait `malloc(strlen(...)+1)` puis copie la chaîne.
-- Nouveau chunk : `[ header (8 bytes) ][ data ("AAAA...") ]`.
+- `strdup` does `malloc(strlen(...)+1)` then copies the string.
+- New chunk: `[ header (8 bytes) ][ data ("AAAA...") ]`.
 
-Layout global typique :
+Typical global layout:
 
 ```
 [ header auth ][ auth data ][ header service ][ service data ]
 ```
 
-Exemple : auth = 0x1000 → auth+0x20 = 0x1020 peut tomber dans **service data**.
+Example: auth = 0x1000 → auth+0x20 = 0x1020 can fall in **service data**.
 
-## Exploit pas à pas
+## Exploit step by step
 
-1. **auth AAAA** → alloue auth.
-2. **service AAAA...** (32 caractères ou plus) → alloue service avec des octets non nuls.
-3. **login** → le programme lit `*(auth+0x20)` ; cette adresse tombe dans service → valeur lue = 0x41 (ou autre non nul) → condition vraie → shell.
+1. **auth AAAA** → allocate auth.
+2. **service AAAA...** (32 characters or more) → allocate service with non-zero bytes.
+3. **login** → the program reads `*(auth+0x20)`; this address falls in service → value read = 0x41 (or other non-zero) → condition true → shell.
 
-## Pourquoi ça marche
+## Why it works
 
-- `*(auth+0x20)` lit **dans** la zone service (car contiguë à auth sur le heap).
-- On ne modifie pas auth ; on modifie la **zone que le programme lit par erreur** en y plaçant notre allocation service.
+- `*(auth+0x20)` reads **inside** the service zone (because it's contiguous to auth on the heap).
+- We don't modify auth; we modify the **zone the program reads by mistake** by placing our service allocation there.
 
-## Conditions importantes
+## Important conditions
 
-- auth reste petit (malloc(4)).
-- service doit être suffisamment long pour que auth+0x20 tombe dans ses données.
-- Éviter les octets nuls si le programme s’arrête dessus (ici des 'A' suffisent).
+- auth stays small (malloc(4)).
+- service must be long enough for auth+0x20 to fall in its data.
+- Avoid null bytes if the program stops on them (here 'A' is enough).
 
-## Comparaison avec Level6
+## Comparison with Level6
 
-| Level | Type d’attaque        | Mécanisme                    |
-| ----- | --------------------- | ---------------------------- |
-| 6     | Overwrite (écriture)  | Overflow → écraser pointeur  |
-| 8     | Out-of-bounds read    | Lecture hors limites → contrôle de la valeur lue |
+| Level | Attack type         | Mechanism                           |
+| ----- | ------------------- | ----------------------------------- |
+| 6     | Overwrite (write)   | Overflow → overwrite pointer        |
+| 8     | Out-of-bounds read  | Read out of bounds → control value read |
 
-## Schéma simplifié
+## Simplified diagram
 
 ```
-Heap :
+Heap:
 
 [ auth (4 bytes) ][ ... ][ service ("AAAA....") ]
         |
-        +---- auth + 0x20  ------> tombe dans service
+        +---- auth + 0x20  ------> falls in service
 ```
 
-## Résumé mental
+## Mental summary
 
-- Le programme **lit trop loin** (auth+32 alors que auth ne fait que 4 octets).
-- Cette zone appartient à une autre allocation (service).
-- On contrôle cette allocation (contenu de service).
-- Donc on contrôle la valeur lue → condition login satisfaite.
+- The program **reads too far** (auth+32 when auth is only 4 bytes).
+- That zone belongs to another allocation (service).
+- We control that allocation (service contents).
+- So we control the value read → login condition satisfied.
 
-**TL;DR :** header = 8 bytes ; malloc(4) ≈ 16 bytes réel ; auth+32 tombe dans service ; exploit = contrôler la **lecture**, pas l’écriture.
+**TL;DR:** header = 8 bytes; malloc(4) ≈ 16 bytes real; auth+32 falls in service; exploit = control the **read**, not the write.
 
-## Phrase pour l’examen
+## Exam phrase
 
-> Le programme lit à l’adresse auth+0x20 alors que auth ne fait que 4 octets. Cette lecture dépasse le bloc alloué et tombe dans une zone adjacente du heap. En contrôlant cette zone via une allocation service, on force la valeur lue à être non nulle et on déclenche l’exécution du shell.
+> The program reads at address auth+0x20 although auth is only 4 bytes. This read goes past the allocated block and lands in an adjacent heap region. By controlling that region via a service allocation, we force the value read to be non-zero and trigger shell execution.
 
-## Références
+## References
 
-- Glibc malloc internals : https://sourceware.org/glibc/wiki/MallocInternals
-- `strdup(3)` : https://man7.org/linux/man-pages/man3/strdup.3.html
+- Glibc malloc internals: https://sourceware.org/glibc/wiki/MallocInternals
+- `strdup(3)`: https://man7.org/linux/man-pages/man3/strdup.3.html

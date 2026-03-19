@@ -1,17 +1,17 @@
-# Layout heap et condition auth+0x20 (level8)
+# Heap layout and auth+0x20 condition (level8)
 
-**Voir aussi :** `oob_read.md` pour la synthèse complète (out-of-bounds read, type d’attaque, chunk glibc, phrase examen).
+**See also:** `oob_read.md` for the full synthesis (out-of-bounds read, attack type, glibc chunk, exam phrase).
 
 ## Concept
-Le programme lit un **octet** à l’adresse **auth+0x20** (auth+32) pour décider si l’utilisateur est “authentifié”. Le bloc **auth** ne fait que 4 octets : auth+0x20 est **en dehors** du bloc auth → **lecture hors limites**. Une autre allocation (**service** = strdup) peut occuper cette zone ; en la contrôlant, on contrôle la valeur lue.
+The program reads one **byte** at address **auth+0x20** (auth+32) to decide if the user is "authenticated". The **auth** block is only 4 bytes: auth+0x20 is **outside** the auth block → **out-of-bounds read**. Another allocation (**service** = strdup) can occupy that region; by controlling it we control the value read.
 
-## Définition simple
-- **auth** = pointeur vers un bloc malloc(4).
-- **login** fait : si `*(auth+0x20) != 0` → `system("/bin/sh")`, sinon "Password:".
-- On ne peut pas écrire 32 octets avec le seul strcpy(auth, ...) (limité à 30 et le bloc fait 4). Donc on n’écrase pas auth directement jusqu’à +0x20.
-- En revanche, **auth+0x20** est une **adresse** dans le heap. Si le bloc **service** (strdup de notre entrée) est alloué juste après auth, cette adresse peut tomber **à l’intérieur** du buffer service.
+## Simple definition
+- **auth** = pointer to a malloc(4) block.
+- **login** does: if `*(auth+0x20) != 0` → `system("/bin/sh")`, else "Password:".
+- We can't write 32 bytes with strcpy(auth, ...) alone (limited to 30 and the block is 4 bytes). So we don't overwrite auth directly up to +0x20.
+- However, **auth+0x20** is an **address** on the heap. If the **service** block (strdup of our input) is allocated right after auth, that address can fall **inside** the service buffer.
 
-## Schéma
+## Diagram
 
 ```
   auth (malloc 4)
@@ -20,35 +20,35 @@ Le programme lit un **octet** à l’adresse **auth+0x20** (auth+32) pour décid
   +----+
   |    |  ...
   +----+
-  |????|  auth+0x20  ← login lit ici ; peut être dans le bloc service
+  |????|  auth+0x20  ← login reads here; may be inside service block
   +----+
-  service (strdup "service" + notre chaîne)
+  service (strdup "service" + our string)
   +------------------+
-  | "serviceAAAA..." |  ← si on met assez de 'A', auth+0x20 est ici
+  | "serviceAAAA..." |  ← if we put enough 'A', auth+0x20 is here
   +------------------+
 ```
 
-## Où ça apparaît (level8)
-- Commande **auth AAAA** → alloue auth (4 octets).
-- Commande **service** + longue chaîne → strdup alloue un bloc (souvent adjacent à auth).
-- Commande **login** → le programme lit *(auth+0x20). Si cette zone a été remplie par le buffer service (octet non nul), la condition est vraie → shell.
+## Where it appears (level8)
+- Command **auth AAAA** → allocates auth (4 bytes).
+- Command **service** + long string → strdup allocates a block (often adjacent to auth).
+- Command **login** → the program reads *(auth+0x20). If that zone was filled by the service buffer (non-zero byte), the condition is true → shell.
 
-## Utilité en exploitation
-- Pas d’écrasement d’adresse : on remplit une **zone** qui est interprétée comme “flag” d’authentification.
-- La longueur de la chaîne après "service" détermine la taille du bloc et où tombent les octets ; **32** caractères (ou plus) suffisent souvent pour que auth+0x20 soit dans le bloc.
+## Use in exploitation
+- No address overwrite: we fill a **zone** that is interpreted as an authentication "flag".
+- The length of the string after "service" determines block size and where bytes land; **32** characters (or more) often suffice for auth+0x20 to be in the block.
 
-## Exemple
+## Example
 ```
   auth AAAA
   service AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
   login
 ```
-→ *(auth+0x20) = 0x41 (ou autre non nul) → shell.
+→ *(auth+0x20) = 0x41 (or other non-zero) → shell.
 
-## Résumé mental
-- Bug = **lecture** hors limites (pas d’overflow d’écriture nécessaire).
-- auth+0x20 tombe dans le chunk **service** ; en remplissant service avec des 'A', *(auth+0x20) = 0x41 → condition vraie.
+## Mental summary
+- Bug = **read** out-of-bounds (no write overflow required).
+- auth+0x20 falls in the **service** chunk; by filling service with 'A', *(auth+0x20) = 0x41 → condition true.
 
-## Références
-- Glibc malloc internals (chunk headers / layout) : https://sourceware.org/glibc/wiki/MallocInternals
-- `malloc(3)` : https://man7.org/linux/man-pages/man3/malloc.3.html
+## References
+- Glibc malloc internals (chunk headers / layout): https://sourceware.org/glibc/wiki/MallocInternals
+- `malloc(3)`: https://man7.org/linux/man-pages/man3/malloc.3.html

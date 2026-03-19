@@ -1,9 +1,9 @@
 /*
- * Reconstruction level9 (Rainfall) — équivalent C du C++.
- * Classe N : vptr + buffer annotation (100 octets) + int à +0x68.
- * setAnnotation fait memcpy(this+4, src, strlen(src)) sans limite.
- * main : deux N, setAnnotation(premier, argv[1]), puis appel virtuel sur second.
- * Exploit : overflow, écraser second->vptr par premier+4, mettre adresse shellcode à premier+4.
+ * Level9 reconstruction (Rainfall) — C equivalent of the C++.
+ * Class N: vptr + annotation buffer (100 bytes) + int at +0x68.
+ * setAnnotation does memcpy(this+4, src, strlen(src)) with no limit.
+ * main: two N, setAnnotation(first, argv[1]), then virtual call on second.
+ * Exploit: overflow, overwrite second->vptr with first+4, put shellcode address at first+4.
  */
 
 #include <stdlib.h>
@@ -26,7 +26,7 @@ void N_init(N *this, int v)
 void N_setAnnotation(N *this, char *s)
 {
 	size_t n = strlen(s);
-	memcpy(this->annotation, s, n);  /* overflow : pas de borne */
+	memcpy(this->annotation, s, n);  /* overflow: no bound */
 }
 
 int main(int argc, char **argv)
@@ -39,7 +39,7 @@ int main(int argc, char **argv)
 	N_init(a, 5);
 	b = malloc(sizeof(N));
 	N_init(b, 6);
-	N_setAnnotation(a, argv[1]);   /* overflow vers b */
-	((void (*)(N *, N *))*(void **)b)(b, a);  /* appel virtuel */
+	N_setAnnotation(a, argv[1]);   /* overflow to b */
+	((void (*)(N *, N *))*(void **)b)(b, a);  /* virtual call */
 	return 0;
 }

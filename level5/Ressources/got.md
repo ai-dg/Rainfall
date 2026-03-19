@@ -1,80 +1,80 @@
 # GOT (Global Offset Table)
 
-## GOT overwrite attack (idée level5)
-Si on peut **écrire en mémoire** (ex. format string `%n`), on remplace une entrée de la GOT par l’adresse d’une fonction de notre choix. Au prochain appel via la PLT, le programme saute vers cette fonction au lieu de la libc. En level5 : `exit(1)` devient en réalité `o()` → `system("/bin/sh")`.
+## GOT overwrite attack (level5 idea)
+If we can **write to memory** (e.g. format string `%n`), we replace a GOT entry with the address of a function we choose. On the next call via the PLT, the program jumps to that function instead of libc. In level5: `exit(1)` effectively becomes `o()` → `system("/bin/sh")`.
 
 ## Concept
-La **GOT** stocke des **pointeurs (adresses)** vers les fonctions externes (et parfois des variables globales externes).
+The **GOT** holds **pointers (addresses)** to external functions (and sometimes external global variables).
 
-- **Principalement** : adresses de fonctions (printf, puts, exit, etc.).
-- **Parfois** : adresses de variables globales externes.
+- **Mainly:** function addresses (printf, puts, exit, etc.).
+- **Sometimes:** external global variable addresses.
 
-Le code du binaire ne connaît pas l’adresse de `exit` ou `printf` au moment du link. Au premier appel, le linker remplit la GOT ; les appels suivants font un **jump indirect** via cette entrée.
+The binary code does not know the address of `exit` or `printf` at link time. On first call, the linker fills the GOT; later calls do an **indirect jump** through that entry.
 
-## Où ça apparaît
-- Section `.got.plt` (ou `.got`) du binaire — en mémoire dans la zone **.data / .got** (voir schéma ci‑dessous).
-- `readelf -r level5` → une entrée par fonction importée (exit, printf, …).
-- Exemple level5 : **exit** → offset GOT `0x8049838`.
+## Where it appears
+- Binary section `.got.plt` (or `.got`) — in memory in the **.data / .got** region (see diagram below).
+- `readelf -r level5` → one entry per imported function (exit, printf, …).
+- Example level5: **exit** → GOT offset `0x8049838`.
 
-Exemple de contenu GOT (adresses réelles après résolution) :
+Example GOT contents (real addresses after resolution):
 
-| Adresse     | Contenu (valeur) | Symbole |
-|------------|-------------------|---------|
-| 0x0804981c | 0xf7e4c060        | printf  |
-| 0x08049820 | 0xf7e3a210        | puts    |
-| 0x08049824 | 0xf7e2d5b0        | exit    |
+| Address     | Content (value) | Symbol |
+|------------|-----------------|--------|
+| 0x0804981c | 0xf7e4c060      | printf |
+| 0x08049820 | 0xf7e3a210      | puts   |
+| 0x08049824 | 0xf7e2d5b0      | exit   |
 
-En C : `GOT[printf] = 0xf7e4c060` ; après overwrite (level5) : `GOT[exit] = adresse de o()`.
+In C: `GOT[printf] = 0xf7e4c060`; after overwrite (level5): `GOT[exit] = address of o()`.
 
-## Layout mémoire (rappel)
+## Memory layout (reminder)
 
 ```
-Adresse haute
+High address
 ┌───────────────┐
-│ Stack (pile)  │  ← %esp (Stack Pointer)
+│ Stack         │  ← %esp (Stack Pointer)
 │               │
 ├───────────────┤
 │     Heap      │  ← malloc
 ├───────────────┤
 │ .bss          │
 │ .data         │
-│ .got          │  ← GOT ici
+│ .got          │  ← GOT here
 │ .plt          │
 ├───────────────┤
 │ Code (.text)  │
 └───────────────┘
-Adresse basse
+Low address
 ```
 
-**Stack** = zone pile ; **Stack Pointer (`%esp`)** = registre qui pointe vers le sommet de la pile.
+**Stack** = stack region; **Stack Pointer (`%esp`)** = register pointing to the top of the stack.
 
-## Utilité en exploitation
-Si on contrôle une **écriture en mémoire** (ex. format string `%n`), on peut **remplacer** l’adresse dans la GOT par une autre (ex. une fonction du binaire). Au prochain appel, le programme saute vers notre cible.
+## Use in exploitation
+If we control a **memory write** (e.g. format string `%n`), we can **replace** the address in the GOT with another (e.g. a function in the binary). On the next call, the program jumps to our target.
 
-| Cible      | Valeur écrite   | Effet                    |
-|-----------|-----------------|--------------------------|
-| GOT exit  | adresse de `o()`| `exit(1)` → `o()` → shell|
+| Target    | Value written   | Effect                    |
+|----------|------------------|---------------------------|
+| GOT exit | address of `o()` | `exit(1)` → `o()` → shell |
 
-## Exemple concret (level5)
-- Dans `n()` : `printf(buffer)` puis `exit(1)`.
-- On écrase **GOT exit** (0x8049838) avec l’adresse de **o** (0x080484a4).
-- Quand le programme fait `exit(1)` → en réalité le CPU lit GOT[exit] et saute vers **o()** → `system("/bin/sh")`.
+## Concrete example (level5)
+- In `n()`: `printf(buffer)` then `exit(1)`.
+- We overwrite **GOT exit** (0x8049838) with the address of **o** (0x080484a4).
+- When the program does `exit(1)` → the CPU actually reads GOT[exit] and jumps to **o()** → `system("/bin/sh")`.
 
-En résumé : ce qui aurait dû être `exit("...")` devient `o()` → **BOOM** → shell.
+In short: what would have been `exit("...")` becomes `o()` → **BOOM** → shell.
 
-## Schéma (flux)
+## Diagram (flow)
 
 ```
-  Avant exploit:
+  Before exploit:
     call exit@plt  →  PLT  →  GOT[exit]  →  libc exit
 
-  Après exploit:
+  After exploit:
     call exit@plt  →  PLT  →  GOT[exit]  →  o()  →  system("/bin/sh")
 ```
 
-## Résumé mental
-GOT = tableau d’adresses des fonctions externes. **GOT overwrite** = mettre une adresse de notre choix dans une entrée GOT pour détourner un appel de fonction.
+## Mental summary
+GOT = table of addresses of external functions. **GOT overwrite** = put an address of our choice in a GOT entry to hijack a function call.
 
-## Références
-- ELF : GOT/PLT et relocations (décrit aussi la structure générale) : https://man7.org/linux/man-pages/man5/elf.5.html
-- Dynamic linker (résolution des symboles) : https://man7.org/linux/man-pages/man8/ld.so.8.html
+## References
+- ELF: GOT/PLT and relocations (also describes overall structure): https://man7.org/linux/man-pages/man5/elf.5.html
+- Dynamic linker (symbol resolution): https://man7.org/linux/man-pages/man8/ld.so.8.html

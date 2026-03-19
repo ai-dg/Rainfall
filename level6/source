@@ -1,7 +1,7 @@
 /*
- * Reconstruction level6 (Rainfall).
- * main : strcpy(buffer, argv[1]) sans limite ; call *fn_ptr.
- * n() exécute system("/bin/cat /home/user/level7/.pass"). Exploit : overflow + écraser fn_ptr par &n.
+ * Level6 reconstruction (Rainfall).
+ * main: strcpy(buffer, argv[1]) with no limit; call *fn_ptr.
+ * n() runs system("/bin/cat /home/user/level7/.pass"). Exploit: overflow + overwrite fn_ptr with &n.
  */
 
 #include <stdlib.h>
@@ -21,12 +21,12 @@ void m(void)
 int main(int argc, char **argv)
 {
 	char  *buf;
-	void **fn_ptr;  /* pointeur vers 4 octets contenant l’adresse de fonction */
+	void **fn_ptr;  /* pointer to 4 bytes holding function address */
 
-	buf = malloc(0x40);
+	buf = malloc(0x40); /* 64 */
 	fn_ptr = (void **)malloc(4);
 	*fn_ptr = (void *)m;
-	strcpy(buf, argv[1]);   /* overflow : pas de limite */
+	strcpy(buf, argv[1]);   /* overflow: no limit */
 	((void (*)(void))*fn_ptr)();
 	return 0;
 }

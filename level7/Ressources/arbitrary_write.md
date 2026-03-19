@@ -1,42 +1,42 @@
-# Arbitrary write (écriture arbitraire)
+# Arbitrary write
 
-**Voir aussi :** `heap_got_overwrite.md` pour la synthèse level7 (layout heap, chaîne d’exploit, GDB, phrase examen).
+**See also:** `heap_got_overwrite.md` for the level7 synthesis (heap layout, exploit chain, GDB, exam phrase).
 
 ## Concept
-Une **arbitrary write** permet d’écrire une **valeur** à une **adresse** de notre choix. Ici on l’obtient en contrôlant la **destination** du second `strcpy` via un premier overflow (heap).
+An **arbitrary write** lets us write a **value** to an **address** we choose. Here we get it by controlling the **destination** of the second `strcpy` via a first overflow (heap).
 
-## Définition simple
-- Premier `strcpy(dest1, argv[1])` : pas de borne, on peut dépasser `dest1` et écraser d’autres variables (ex. `dest2`).
-- Si `dest2` est utilisé comme **destination** du second `strcpy(dest2, argv[2])`, alors on choisit **où** argv[2] est copié : on met l’adresse cible dans argv[1], la valeur dans argv[2].
+## Simple definition
+- First `strcpy(dest1, argv[1])`: no bound, we can exceed `dest1` and overwrite other variables (e.g. `dest2`).
+- If `dest2` is used as the **destination** of the second `strcpy(dest2, argv[2])`, then we choose **where** argv[2] is copied: we put the target address in argv[1], the value in argv[2].
 
-## Où ça apparaît (level7)
-- Deux structures : ptr1 (bloc 8 octets), ptr2 (bloc 8 octets). Chacune a un champ pointeur vers un buffer.
-- `strcpy(ptr1[1], argv[1])` puis `strcpy(ptr2[1], argv[2])`.
-- En overflowant le premier buffer, on écrase **ptr2[1]** (la destination du 2ᵉ strcpy).
-- On met **GOT de puts** dans argv[1] (à l’offset qui écrase ptr2[1]), et **adresse de m** dans argv[2] → le 2ᵉ strcpy écrit l’adresse de m dans la GOT.
+## Where it appears (level7)
+- Two structures: ptr1 (8-byte block), ptr2 (8-byte block). Each has a pointer field to a buffer.
+- `strcpy(ptr1[1], argv[1])` then `strcpy(ptr2[1], argv[2])`.
+- By overflowing the first buffer we overwrite **ptr2[1]** (the 2nd strcpy destination).
+- We put **GOT of puts** in argv[1] (at the offset that overwrites ptr2[1]), and **address of m** in argv[2] → the 2nd strcpy writes the address of m into the GOT.
 
-## Schéma
+## Diagram
 
 ```
-  argv[1] = [padding 20 octets][adresse GOT puts]
+  argv[1] = [padding 20 bytes][puts GOT address]
               ↓ overflow
-  ptr1[1] remplit son bloc, puis écrase ptr2[0], ptr2[1]
-  ptr2[1] = adresse GOT puts  →  strcpy(GOT_puts, argv[2])
-  argv[2] = adresse de m (4 octets)  →  écrit à GOT puts
+  ptr1[1] fills its block, then overwrites ptr2[0], ptr2[1]
+  ptr2[1] = puts GOT address  →  strcpy(GOT_puts, argv[2])
+  argv[2] = address of m (4 bytes)  →  write to GOT puts
 ```
 
-## Utilité en exploitation
-- Un seul “gadget” : **écriture d’une valeur à une adresse choisie**.
-- Cible = entrée GOT (puts) ; valeur = adresse de la fonction qu’on veut appeler à la place (m).
+## Use in exploitation
+- One "gadget": **write a value to a chosen address**.
+- Target = GOT entry (puts); value = address of the function we want to call instead (m).
 
-## Exemple level7
-- Offset vers ptr2[1] : **20** octets (8 + 8 + 4 selon le layout).
+## Level7 example
+- Offset to ptr2[1]: **20** bytes (8 + 8 + 4 depending on layout).
 - argv[1] = `"A"*20 + "\x28\x99\x04\x08"` (GOT puts 0x8049928).
 - argv[2] = `"\xf4\x84\x04\x08"` (m = 0x080484f4).
-- Résultat : `puts("~~")` appelle m() qui affiche le buffer contenant le mot de passe.
+- Result: `puts("~~")` calls m() which prints the buffer containing the password.
 
-## Résumé mental
-Arbitrary write = contrôler à la fois l’adresse d’écriture et la valeur. Ici : overflow pour contrôler la destination du 2ᵉ strcpy, puis écrire dans la GOT.
+## Mental summary
+Arbitrary write = control both the write address and the value. Here: overflow to control the 2nd strcpy destination, then write to the GOT.
 
-## Références
-- `strcpy(3)` (absence de borne / copie jusqu’au `\0`) : https://man7.org/linux/man-pages/man3/strcpy.3.html
+## References
+- `strcpy(3)` (no bound / copy until `\0`): https://man7.org/linux/man-pages/man3/strcpy.3.html

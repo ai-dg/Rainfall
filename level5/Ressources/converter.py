@@ -1,6 +1,6 @@
 from pwn import *
 
-## level5
+# level5: format string GOT overwrite (exit -> o)
 
 exit_got = 0x08049838
 o_addr   = 0x080484a4

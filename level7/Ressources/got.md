@@ -1,28 +1,28 @@
 # GOT (Global Offset Table) — level7
 
-**Voir aussi :** `heap_got_overwrite.md` pour la synthèse level7 (heap overflow → arbitrary write → GOT overwrite, comparaison level5).
+**See also:** `heap_got_overwrite.md` for the level7 synthesis (heap overflow → arbitrary write → GOT overwrite, comparison with level5).
 
 ## Concept
-La GOT stocke les adresses résolues des fonctions externes. En level7, on **remplace** l’entrée de **puts** par l’adresse de **m** pour que l’appel à `puts("~~")` exécute en réalité `m()` et affiche le buffer contenant le mot de passe.
+The GOT holds the resolved addresses of external functions. In level7 we **replace** the **puts** entry with the address of **m** so that the call to `puts("~~")` actually runs `m()` and prints the buffer containing the password.
 
-## Lien avec le level
-- Le programme lit le mot de passe dans un buffer **c**, puis appelle **puts** (pour afficher "~~").
-- **m()** fait `printf("%s - %d\n", c, time)` : affiche exactement ce qu’on veut (le mot de passe).
-- On n’a pas de format string : on utilise une **arbitrary write** (overflow + second strcpy) pour écrire l’adresse de m dans la GOT de puts.
+## Link with the level
+- The program reads the password into buffer **c**, then calls **puts** (to print "~~").
+- **m()** does `printf("%s - %d\n", c, time)`: prints exactly what we want (the password).
+- We don't have a format string: we use an **arbitrary write** (overflow + second strcpy) to write the address of m into the puts GOT.
 
-## Adresses (level7)
-- GOT puts : **0x8049928** (destination de l’écriture).
-- m : **0x080484f4** (valeur à écrire).
+## Addresses (level7)
+- GOT puts: **0x8049928** (write destination).
+- m: **0x080484f4** (value to write).
 
-## Flux
+## Flow
 
 ```
-  Normal :  puts("~~")  →  PLT  →  GOT[puts]  →  libc puts
-  Exploit : puts("~~")  →  PLT  →  GOT[puts]  →  m()  →  printf(c)  →  mot de passe
+  Normal:  puts("~~")  →  PLT  →  GOT[puts]  →  libc puts
+  Exploit: puts("~~")  →  PLT  →  GOT[puts]  →  m()  →  printf(c)  →  password
 ```
 
-## Résumé mental
-Même idée que level5 (GOT overwrite), mais la primitive d’écriture est différente : arbitrary write via deux strcpy au lieu de format string.
+## Mental summary
+Same idea as level5 (GOT overwrite), but the write primitive is different: arbitrary write via two strcpy instead of format string.
 
-## Références
-- ELF : GOT/PLT et relocations : https://man7.org/linux/man-pages/man5/elf.5.html
+## References
+- ELF: GOT/PLT and relocations: https://man7.org/linux/man-pages/man5/elf.5.html

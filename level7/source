@@ -1,7 +1,7 @@
 /*
- * Reconstruction level7 (Rainfall).
- * Deux strcpy sans limite ; le second copie vers un pointeur qu’on peut écraser.
- * Exploit : écrire l’adresse du buffer c à l’emplacement de l’argument de puts.
+ * Level7 reconstruction (Rainfall).
+ * Two strcpy with no limit; the second copies to a pointer we can overwrite.
+ * Exploit: write the address of buffer c (via m) into the puts GOT entry.
  */
 
 #include <stdlib.h>
@@ -29,14 +29,14 @@ int main(int argc, char **argv)
 	*(int *)ptr2 = 2;
 	*(void **)((char *)ptr2 + 4) = buf2 = malloc(8);
 
-	strcpy(buf1, argv[1]);   /* overflow : écrase ptr2 puis ptr2->ptr */
-	strcpy(buf2, argv[2]);   /* écrit argv[2] à l’adresse (ptr2->ptr) */
+	strcpy(buf1, argv[1]);   /* overflow: overwrites ptr2 then ptr2->ptr */
+	strcpy(buf2, argv[2]);   /* writes argv[2] to address (ptr2->ptr) */
 
 	FILE *f = fopen("/home/user/level8/.pass", "r");
 	if (f) {
 		fgets(c, 0x44, f); /* bytes 68 */
 		fclose(f);
 	}
-	puts("~~");   /* argument à 0x80485f4 ; on le remplace par &c */
+	puts("~~");   /* we replace GOT[puts] with &m so this prints c */
 	return 0;
 }

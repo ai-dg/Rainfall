@@ -1,25 +1,25 @@
 # PLT (Procedure Linkage Table)
 
 ## Concept
-La **PLT** est du **code** (une série de petits stubs) qui sert à appeler des fonctions externes (printf, exit, etc.). Très important en exploitation : chaque appel à une fonction dynamique passe par sa entrée PLT.
+The **PLT** is **code** (a series of small stubs) used to call external functions (printf, exit, etc.). Very important in exploitation: every call to a dynamic function goes through its PLT entry.
 
-**Exemple** : `08048380 <printf@plt>` = « voici l’entrée pour appeler printf dans le binaire ».
+**Example:** `08048380 <printf@plt>` = "here is the entry to call printf in the binary".
 
 ## PLT vs GOT
 
-| Élément | Nature                         |
-| ------- | ------------------------------ |
-| **PLT** | code (instructions assembleur) |
-| **GOT** | données (table d’adresses)      |
+| Element | Nature                    |
+| ------- | ------------------------- |
+| **PLT** | code (assembly instructions) |
+| **GOT** | data (address table)      |
 
-- Le code appelle toujours la **même adresse** (ex. `printf@plt`).
-- La première fois : le stub PLT appelle le linker, qui remplit la GOT.
-- Les fois suivantes : le stub PLT fait `jmp *GOT[x]` vers la vraie fonction.
+- The code always calls the **same address** (e.g. `printf@plt`).
+- First time: the PLT stub calls the linker, which fills the GOT.
+- Subsequent times: the PLT stub does `jmp *GOT[x]` to the real function.
 
-## Flux d’un appel
+## Call flow
 
 ```
-printf("hello")  en C
+printf("hello")  in C
        ↓
 main  →  call printf@plt
               ↓
@@ -28,37 +28,37 @@ main  →  call printf@plt
                          GOT[printf]  →  printf (libc)
 ```
 
-Résumé : **printf → PLT → GOT → libc (printf réel)**. Si on modifie la GOT, on redirige l’appel.
+Summary: **printf → PLT → GOT → libc (real printf)**. If we modify the GOT, we redirect the call.
 
-## Où ça apparaît
-- Section `.plt` du binaire.
-- `objdump -d level5` : blocs du type :
+## Where it appears
+- Binary section `.plt`.
+- `objdump -d level5`: blocks like:
 
 ```asm
   8048380 <printf@plt>:
-    jmp    *0x8049824   ; saut indirect via GOT
+    jmp    *0x8049824   ; indirect jump via GOT
     push   $0x0
-    jmp    80482f0      ; résolution (premier appel)
+    jmp    80482f0      ; resolution (first call)
 ```
 
-Pour repérer tous les appels : `objdump -d level5 | grep call`.
+To find all calls: `objdump -d level5 | grep call`.
 
-## Utilité en exploitation (level5)
-On ne modifie pas la PLT (c’est du code). On modifie la **GOT**. Au prochain `call exit@plt`, le CPU exécute le stub PLT qui fait `jmp *GOT[exit]` : si GOT[exit] = adresse de `o`, on exécute `o()`.
+## Use in exploitation (level5)
+We do not modify the PLT (it's code). We modify the **GOT**. On the next `call exit@plt`, the CPU runs the PLT stub which does `jmp *GOT[exit]`: if GOT[exit] = address of `o`, we run `o()`.
 
-## Schéma
+## Diagram
 
 ```
   .text          .plt              .got.plt
   -----          ----              --------
   call exit@plt  →  jmp *0x8049838  →  [0x8049838] = ???
                          ↑
-                    on écrit ici l’adresse de o()
+                    we write o()'s address here
 ```
 
-## Résumé mental
-PLT = trampoline qui utilise la GOT. Exploit = modifier la GOT, pas la PLT.
+## Mental summary
+PLT = trampoline that uses the GOT. Exploit = modify the GOT, not the PLT.
 
-## Références
-- ELF (sections/relocations/GOT-PLT) : https://man7.org/linux/man-pages/man5/elf.5.html
-- Dynamic linker (`ld.so`) : https://man7.org/linux/man-pages/man8/ld.so.8.html
+## References
+- ELF (sections/relocations/GOT-PLT): https://man7.org/linux/man-pages/man5/elf.5.html
+- Dynamic linker (`ld.so`): https://man7.org/linux/man-pages/man8/ld.so.8.html

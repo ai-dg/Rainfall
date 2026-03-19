@@ -1,25 +1,25 @@
-# libc (bibliothèque C standard)
+# libc (C standard library)
 
 ## Concept
-**libc** = Library C = bibliothèque C standard. Elle fournit les fonctions de base (E/S, chaînes, mémoire, processus). Les binaires dynamiques y font référence via la GOT/PLT.
+**libc** = C Library = C standard library. It provides core functions (I/O, strings, memory, process). Dynamic binaries reference it via GOT/PLT.
 
-## Fonctions courantes (repérer avec `readelf -s`, `ltrace`)
+## Common functions (find with `readelf -s`, `ltrace`)
 
-| Catégorie | Exemples |
-| --------- | -------- |
-| E/S, format | `printf`, `scanf`, `puts`, `sprintf` |
-| Lecture | `gets` ⚠️, `fgets`, `fopen`, `fread`, `fwrite` |
-| Mémoire | `malloc`, `free`, `calloc`, `realloc` |
-| Chaînes | `strlen`, `strcpy` ⚠️, `strncpy`, `strcmp`, `strcat` ⚠️ |
-| Processus | `system` 💣, `exit`, `fork`, `execve` 💣 |
+| Category   | Examples |
+| ---------- | -------- |
+| I/O, format | `printf`, `scanf`, `puts`, `sprintf` |
+| Read       | `gets` ⚠️, `fgets`, `fopen`, `fread`, `fwrite` |
+| Memory     | `malloc`, `free`, `calloc`, `realloc` |
+| Strings    | `strlen`, `strcpy` ⚠️, `strncpy`, `strcmp`, `strcat` ⚠️ |
+| Process    | `system` 💣, `exit`, `fork`, `execve` 💣 |
 
-## En exploitation
+## In exploitation
 
-- **⚠️ Vulnérables** (sans borne ou format) : `gets`, `strcpy`, `strcat`, `sprintf`, `printf(buffer)`.
-- **💣 Cibles** : `system("/bin/sh")`, `execve("/bin/sh", ...)` — souvent présentes ou atteignables via GOT overwrite / ret2libc.
+- **⚠️ Vulnerable** (unbounded or format): `gets`, `strcpy`, `strcat`, `sprintf`, `printf(buffer)`.
+- **💣 Targets:** `system("/bin/sh")`, `execve("/bin/sh", ...)` — often present or reachable via GOT overwrite / ret2libc.
 
-En level5 : pas d’appel direct à `system` dans le flux normal ; la fonction `o()` fait `system("/bin/sh")`. On détourne **exit** (GOT) vers **o** pour l’exécuter.
+In level5: no direct call to `system` in normal flow; function `o()` does `system("/bin/sh")`. We hijack **exit** (GOT) to **o** to run it.
 
-## Références
+## References
 - `man 3 printf`, `man 3 strcpy`, etc.
-- Glibc : https://www.gnu.org/software/libc/
+- Glibc: https://www.gnu.org/software/libc/
