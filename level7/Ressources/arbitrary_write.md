@@ -1,7 +1,9 @@
 # Arbitrary write (écriture arbitraire)
 
+**Voir aussi :** `heap_got_overwrite.md` pour la synthèse level7 (layout heap, chaîne d’exploit, GDB, phrase examen).
+
 ## Concept
-Une **arbitrary write** permet d’écrire une **valeur** à une **adresse** de notre choix. Ici on l’obtient en contrôlant la **destination** d’un `strcpy` via un premier overflow.
+Une **arbitrary write** permet d’écrire une **valeur** à une **adresse** de notre choix. Ici on l’obtient en contrôlant la **destination** du second `strcpy` via un premier overflow (heap).
 
 ## Définition simple
 - Premier `strcpy(dest1, argv[1])` : pas de borne, on peut dépasser `dest1` et écraser d’autres variables (ex. `dest2`).

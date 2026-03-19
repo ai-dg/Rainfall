@@ -13,7 +13,7 @@ Référence : `commands.md`, Recon / Extraction.
 ## 3. Binary-to-source translation (source reconstruction)
 - **main :** deux structures (ptr1, ptr2) avec malloc(8) chacune, et ptr1[1], ptr2[1] pointent vers des blocs de 8 octets. **strcpy(ptr1[1], argv[1])** et **strcpy(ptr2[1], argv[2])** sans limite. Ensuite fopen(".pass"), fgets(c, ...), puis **puts** (adresse en dur). **m()** fait printf avec le buffer **c**.
 - **Où ça peut casser :** le premier strcpy remplit le bloc ptr1[1] (8 octets). En dépassant, on écrase la zone suivante en mémoire (bloc suivant = ptr2[0] et ptr2[1]). Donc on contrôle **ptr2[1]** = destination du second strcpy. Si on met **GOT de puts** dans ptr2[1] et **adresse de m** dans argv[2], le second strcpy écrit l’adresse de m dans la GOT → puts("~~") appellera m() et affichera c.
-- Source : voir `source.c` / `source.md`.
+- Source : voir `source`.
 
 ## 4. Understanding where it can break (vulnerability hypothesis)
 - **Fonctions suspectes :** deux strcpy sans limite ; le premier overflow permet de contrôler la **destination** du second (arbitrary write).
@@ -96,6 +96,7 @@ Résumé : **20×'A'** + **\x28\x99\x04\x08** = ptr2[1] pointe vers la GOT ; **\
 - **Commande :** `./level7 $(python -c 'print "A"*20 + "\x28\x99\x04\x08"') $(python -c 'print "\xf4\x84\x04\x08"')`.
 - **Résultat attendu :** une ligne "(mot de passe) - (timestamp)" ; le mot de passe level8 est la première partie.
 - **À dire :** « Le premier strcpy overflow et écrase ptr2[1]. Je mets la GOT de puts dans ptr2[1] et l’adresse de m dans argv[2]. Le second strcpy écrit m dans la GOT ; puts appelle alors m() qui affiche c. »
+- **Phrase type (examen) :** « Le programme contient un heap overflow via un strcpy non sécurisé. Ce débordement permet d’écraser un pointeur utilisé comme destination dans un second strcpy, ce qui donne une primitive d’écriture arbitraire. On l’utilise pour écraser l’entrée GOT de puts avec l’adresse de m ; lorsque puts est appelé, le programme exécute m à la place et affiche le mot de passe. »
 
 ## 8. Oral defense points
 - **Bug :** strcpy(ptr1[1], argv[1]) sans limite ; en dépassant 8 octets on écrase ptr2[1], donc la destination du 2ᵉ strcpy.

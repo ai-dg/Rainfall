@@ -63,6 +63,8 @@ Référence rapide : types d’attaques, commandes de recon, registres et instru
 | `push X`    | empile une valeur | `%esp -= 4`      | écrit `X` à l'adresse `%esp`       | `esp = esp - 4; *esp = X;`                    |
 | `pop X`     | dépile une valeur | `%esp += 4`      | lit valeur depuis `%esp` vers `X`  | `X = *esp; esp = esp + 4;`                    |
 | `call addr` | appel de fonction | `%esp -= 4`      | push l'adresse de retour           | `push return_addr; jmp addr;`                 |
+| `jmp addr`  | saut inconditionnel | aucun effet     | aucun accès stack                  | `goto addr;`                                  |
+| `jmp *addr` | saut indirect (via mémoire) | aucun effet | lit une adresse en mémoire puis saute | `goto *(addr);` (ex: GOT)                     |
 | `sub X, %esp` | réserve de la place sur la stack | `%esp -= X` | crée un espace pour variables locales | `esp = esp - X;`                              |
 | `mov src, dst` | copie une valeur | aucun effet direct | copie une donnée (registre/mémoire) | `dst = src;`                                  |
 | `lea addr, reg` | charge une adresse (pas la valeur) | aucun effet | aucune écriture mémoire | `reg = &addr;`                                |

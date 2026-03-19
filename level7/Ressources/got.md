@@ -1,5 +1,7 @@
 # GOT (Global Offset Table) — level7
 
+**Voir aussi :** `heap_got_overwrite.md` pour la synthèse level7 (heap overflow → arbitrary write → GOT overwrite, comparaison level5).
+
 ## Concept
 La GOT stocke les adresses résolues des fonctions externes. En level7, on **remplace** l’entrée de **puts** par l’adresse de **m** pour que l’appel à `puts("~~")` exécute en réalité `m()` et affiche le buffer contenant le mot de passe.
 

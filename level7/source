@@ -34,7 +34,7 @@ int main(int argc, char **argv)
 
 	FILE *f = fopen("/home/user/level8/.pass", "r");
 	if (f) {
-		fgets(c, 0x44, f);
+		fgets(c, 0x44, f); /* bytes 68 */
 		fclose(f);
 	}
 	puts("~~");   /* argument à 0x80485f4 ; on le remplace par &c */
