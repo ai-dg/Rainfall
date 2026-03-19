@@ -34,5 +34,7 @@ En C++, les appels virtuels passent par une **table de fonctions** (vtable) poin
 ## Résumé mental
 vptr = pointeur vers la vtable. Overflow pour remplacer vptr par une adresse qu’on contrôle ; *(cette adresse) = adresse de la fonction appelée → on met l’adresse du shellcode.
 
+**Voir aussi :** `concepts.md` pour la chaîne d’exploit complète, layout heap, GDB, payload.
+
 ## Références
 - Itanium C++ ABI (vtable/vptr) : https://itanium-cxx-abi.github.io/cxx-abi/abi.html#vtable

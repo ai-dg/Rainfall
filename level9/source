@@ -3,7 +3,7 @@
  * Classe N : vptr + buffer annotation (100 octets) + int à +0x68.
  * setAnnotation fait memcpy(this+4, src, strlen(src)) sans limite.
  * main : deux N, setAnnotation(premier, argv[1]), puis appel virtuel sur second.
- * Exploit : overflow, écraser second->vptr par premier+4, mettre system à premier+4.
+ * Exploit : overflow, écraser second->vptr par premier+4, mettre adresse shellcode à premier+4.
  */
 
 #include <stdlib.h>

