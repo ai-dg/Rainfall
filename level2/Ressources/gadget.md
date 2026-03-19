@@ -1,16 +1,16 @@
-# Gadget (ROP / second saut)
+# Gadget (ROP / second jump)
 
 ## Concept
-Un **gadget** est une courte séquence d’instructions déjà présente dans le binaire (ex. `pop reg; ret`). En plaçant cette adresse en adresse de retour, on « consomme » des mots sur la stack puis on saute vers l’adresse suivante (qu’on contrôle).
+A **gadget** is a short instruction sequence already present in the binary (e.g. `pop reg; ret`). By placing this address as the return address, we "consume" words from the stack and then jump to the next address (which we control).
 
-## Définition simple
-- Ex. `pop ebx; ret` : pop lit 4 octets (notre adresse buffer), ret lit les 4 suivants (encore l’adresse buffer) et saute → exécution du code au début du buffer.
+## Simple definition
+- E.g. `pop ebx; ret`: pop reads 4 bytes (our buffer address), ret reads the next 4 (also the buffer address) and jumps → execution of code at the start of the buffer.
 
-## Où ça apparaît (level2)
-- **0x08048385** : `pop ebx; ret`. Payload : [shellcode][padding][0x08048385][addr_buf][addr_buf]. Au ret de p → gadget ; après pop+ret → buffer (shellcode).
+## Where it appears (level2)
+- **0x08048385**: `pop ebx; ret`. Payload: [shellcode][padding][0x08048385][buf_addr][buf_addr]. At p's ret → gadget; after pop+ret → buffer (shellcode).
 
-## Résumé mental
-Gadget = petit bout de code existant pour rediriger le flux (ici : sauter au buffer malgré la contrainte 0xb...).
+## Mental summary
+Gadget = small existing piece of code to redirect flow (here: jump to the buffer despite the 0xb... constraint).
 
-## Références
-- Recherche de gadgets : `objdump -d level2 | grep -A1 pop`
+## References
+- Finding gadgets: `objdump -d level2 | grep -A1 pop`

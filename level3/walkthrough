@@ -1,44 +1,44 @@
 # Level3 - Exam Notes
 
 ## 1. Objective
-Obtenir un shell level4. Le binaire est setuid level4 ; la variable globale `m` doit valoir 64 pour que `system("/bin/sh")` soit appelé. `m` n’est jamais initialisée à 64 dans le code.
+Get a level4 shell. The binary is setuid level4; the global variable `m` must equal 64 for `system("/bin/sh")` to be called. `m` is never initialized to 64 in the code.
 
 ## 2. Initial diagnosis (before GDB)
-- **Fonctions suspectes :** `fgets` puis **printf(buffer)** dans `v()` — l’entrée est utilisée comme chaîne de format (format string).
-- **Entrée utilisateur :** buffer 512 octets lu par fgets, passé tel quel à printf.
-- **Succès :** `m == 64` (0x40) à l’adresse 0x804988c → branche system("/bin/sh").
-- **Hypothèse :** format string ; utiliser %n pour écrire 64 à l’adresse de m. Le 1er argument de printf est le buffer → %1$n écrit à l’adresse contenue au début du buffer.
+- **Suspicious functions:** `fgets` then **printf(buffer)** in `v()` — the input is used as a format string (format string vulnerability).
+- **User input:** 512-byte buffer read by fgets, passed as-is to printf.
+- **Success:** `m == 64` (0x40) at address 0x804988c → system("/bin/sh") branch.
+- **Hypothesis:** format string; use %n to write 64 to the address of m. The 1st argument to printf is the buffer → %1$n writes to the address stored at the start of the buffer.
 
 ## 3. GDB diagnosis (how the vulnerability was found)
-- **Où break :** dans `v`, après l’appel à printf(buffer). But : vérifier que m (0x804988c) a bien été modifiée.
-- **Layout :** pas d’overflow stack ; on s’intéresse à la variable globale. `x/wx 0x804988c` avant exploit → valeur initiale (souvent 0). Après payload avec adresse 0x804988c + "%60x%1$n" → `x/wx 0x804988c` doit valoir 0x40 (64). Cela prouve que %1$n écrit bien à l’adresse qu’on a mise au début du buffer.
-- **Index du buffer :** le 1er argument de printf est notre chaîne (le buffer). Donc l’argument 1 pointe vers le début du buffer ; si les 4 premiers octets du buffer sont 0x804988c, alors %1$n écrit à cette adresse. Pas besoin de dump %1$p…%k$p pour ce level.
-- **Valeur 64 :** %n écrit le nombre d’octets déjà imprimés. On imprime 4 (l’adresse) + 60 (avec "%60x") = 64, puis %1$n → 64 écrit à 0x804988c.
-- **Contrôle du flux :** après printf, le code lit m ; si m == 64, il appelle system("/bin/sh"). Vérifier en single-step ou en relançant avec le payload.
+- **Where to break:** in `v`, after the call to printf(buffer). Goal: verify that m (0x804988c) has been modified.
+- **Layout:** no stack overflow; we care about the global variable. `x/wx 0x804988c` before exploit → initial value (usually 0). After payload with address 0x804988c + "%60x%1$n" → `x/wx 0x804988c` should be 0x40 (64). This proves %1$n correctly writes to the address placed at the start of the buffer.
+- **Buffer index:** the 1st argument to printf is our string (the buffer). So argument 1 points to the start of the buffer; if the first 4 bytes of the buffer are 0x804988c, then %1$n writes to that address. No need to dump %1$p…%k$p for this level.
+- **Value 64:** %n writes the number of bytes already printed. We print 4 (the address) + 60 (with "%60x") = 64, then %1$n → 64 written to 0x804988c.
+- **Flow control:** after printf, the code reads m; if m == 64, it calls system("/bin/sh"). Verify with single-step or by relaunching with the payload.
 
 ## 4. Building the exploit command
-- **Cible :** écrire la valeur 64 à l’adresse 0x804988c (variable m).
-- **Structure du payload :** [4 octets = 0x804988c en LE] + "%60x" + "%1$n". Les 4 octets sont l’adresse où %1$n écrira ; "%60x" affiche 60 caractères (total 4+60=64) ; %1$n écrit 64 à 0x804988c.
-- **Encodage :** adresse en little endian : `\x8c\x98\x04\x08`. Python : `print "\x8c\x98\x04\x08" + "%60x%1$n"`.
-- **Invocation :** stdin ; garder le shell : `( python -c '...'; cat ) | ./level3`.
-- **Référence commands.md :** commande dans `commands.md`, section Exploitation. Démo : `( python -c 'print "\x8c\x98\x04\x08" + "%60x%1$n"'; cat ) | ./level3`.
+- **Target:** write the value 64 to address 0x804988c (variable m).
+- **Payload structure:** [4 bytes = 0x804988c in LE] + "%60x" + "%1$n". The 4 bytes are the address where %1$n will write; "%60x" prints 60 characters (total 4+60=64); %1$n writes 64 to 0x804988c.
+- **Encoding:** address in little endian: `\x8c\x98\x04\x08`. Python: `print "\x8c\x98\x04\x08" + "%60x%1$n"`.
+- **Invocation:** stdin; keep the shell: `( python -c '...'; cat ) | ./level3`.
+- **Reference commands.md:** command in `commands.md`, section Exploitation. Demo: `( python -c 'print "\x8c\x98\x04\x08" + "%60x%1$n"'; cat ) | ./level3`.
 
 ## 5. Exploitation logic
-Format string : l’entrée est le format de printf. En mettant l’adresse de m au début du buffer, %1$n écrit le nombre d’octets imprimés (64) à cette adresse. Le test m == 64 passe → system("/bin/sh").
+Format string: the input is the format of printf. By putting the address of m at the start of the buffer, %1$n writes the number of printed bytes (64) to that address. The check m == 64 passes → system("/bin/sh").
 
 ## 6. Reproducible procedure (for evaluation)
-- **Commande :** `( python -c 'print "\x8c\x98\x04\x08" + "%60x%1$n"'; cat ) | ./level3` puis `cat /home/user/level4/.pass`.
-- **Résultat attendu :** « Wait what?! » puis shell level4.
-- **À dire :** « printf(buffer) donne une format string. Je mets l’adresse de m au début du buffer et j’utilise %60x%1$n pour écrire 64 à cette adresse. »
+- **Command:** `( python -c 'print "\x8c\x98\x04\x08" + "%60x%1$n"'; cat ) | ./level3` then `cat /home/user/level4/.pass`.
+- **Expected result:** "Wait what?!" then a level4 shell.
+- **What to say:** "printf(buffer) gives a format string. I put the address of m at the start of the buffer and use %60x%1$n to write 64 to that address."
 
 ## 7. Oral defense points
-- **Bug :** printf(buffer) avec buffer contrôlé par l’utilisateur (v(), après fgets).
-- **GDB :** confirme que m est à 0x804988c et qu’après le payload elle vaut 64 ; %1$n écrit au 1er argument = début du buffer.
-- **Payload :** 4 octets (adresse de m) + "%60x%1$n".
-- **Fix :** printf("%s", buffer) ou ne jamais utiliser l’entrée comme format.
+- **Bug:** printf(buffer) with a user-controlled buffer (v(), after fgets).
+- **GDB:** confirms m is at 0x804988c and that after the payload it equals 64; %1$n writes to the 1st argument = start of the buffer.
+- **Payload:** 4 bytes (address of m) + "%60x%1$n".
+- **Fix:** printf("%s", buffer) or never use input as a format string.
 
 ## 8. Common evaluator questions
-- **Que fait %n ?** Il écrit le nombre d’octets déjà imprimés à l’adresse fournie par l’argument correspondant.
-- **Pourquoi %1$n ?** Le 1er argument de printf est notre buffer ; en mettant une adresse au début, %1$n écrit à cette adresse.
-- **Pourquoi 60 ?** 4 (adresse) + 60 = 64, valeur requise pour m.
-- **Où est m ?** Variable globale en .bss à 0x804988c.
+- **What does %n do?** It writes the number of bytes already printed to the address provided by the corresponding argument.
+- **Why %1$n?** The 1st argument to printf is our buffer; by putting an address at the start, %1$n writes to that address.
+- **Why 60?** 4 (address) + 60 = 64, the required value for m.
+- **Where is m?** Global variable in .bss at 0x804988c.

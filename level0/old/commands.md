@@ -1,4 +1,4 @@
-# Level0 — Commandes
+# Level0 — Commands
 
 ## Connection
 
@@ -6,114 +6,114 @@
 ssh level0@localhost -p 4242
 ```
 
-Mot de passe : `level0`
+Password: `level0`
 
 ---
 
 ## Recon
 
-### Étape 1 — Environnement et binaire
+### Step 1 — Environment and binary
 
 ```bash
 pwd
 ls -la
 ```
 
-**But :** Vérifier le répertoire de travail et lister les fichiers du home (dont le binaire level0).
+**Goal:** Check the working directory and list the home files (including the level0 binary).
 
 ---
 
-### Étape 2 — Type et architecture du binaire
+### Step 2 — Binary type and architecture
 
 ```bash
 file level0
 ```
 
-**But :** Confirmer qu’il s’agit d’un ELF (exécutable Linux) et noter l’architecture (i386 / x86-64).
+**Goal:** Confirm it is an ELF (Linux executable) and note the architecture (i386 / x86-64).
 
 ---
 
-### Étape 3 — Chaînes et indices
+### Step 3 — Strings and hints
 
 ```bash
 strings level0
 ```
 
-**But :** Repérer des messages, chemins, noms de fonctions ou chaînes suspectes (ex. gets, system, /bin/).
+**Goal:** Spot messages, paths, function names, or suspicious strings (e.g. gets, system, /bin/).
 
 ---
 
-### Étape 4 — En-tête et sections ELF
+### Step 4 — ELF header and sections
 
 ```bash
 readelf -h level0
 ```
 
-**But :** Vérifier l’entrée du programme, le type d’ELF et l’architecture.
+**Goal:** Check the program entry point, ELF type, and architecture.
 
 ---
 
-### Étape 5 — Symboles (si non strié)
+### Step 5 — Symbols (if not stripped)
 
 ```bash
 readelf -s level0
-# ou si readelf -s ne montre rien d’utile :
+# or if readelf -s shows nothing useful:
 nm level0
 ```
 
-**But :** Lister les symboles (fonctions, variables) pour repérer des cibles d’exploitation (main, fonctions utilisateur, appels dangereux).
+**Goal:** List symbols (functions, variables) to identify exploitation targets (main, user functions, dangerous calls).
 
 ---
 
 ## What we expect to learn
 
-- **Emplacement et type :** Le binaire `level0` est bien dans le home ; c’est un ELF (souvent i386 pour Rainfall).
-- **Strings :** Indices sur la logique (prompts, chemins, noms de fonctions comme `gets`, `system`, etc.).
-- **Symboles :** Présence de `main`, de fonctions utilisateur et éventuellement d’appels risqués (gets, strcpy, etc.) pour orienter l’analyse.
-- **Pas d’exploitation à ce stade :** On ne fait que du repérage pour la suite (analyse dynamique, hypothèse de vulnérabilité).
+- **Location and type:** The binary `level0` is in the home; it is an ELF (often i386 for Rainfall).
+- **Strings:** Hints about the logic (prompts, paths, function names like `gets`, `system`, etc.).
+- **Symbols:** Presence of `main`, user functions, and possibly risky calls (gets, strcpy, etc.) to guide the analysis.
+- **No exploitation at this stage:** This is reconnaissance only for the next steps (dynamic analysis, vulnerability hypothesis).
 
 ---
 
 ---
 
-## Résultats exécutés (recon)
+## Executed results (recon)
 
-**Étape 1**
+**Step 1**
 - `pwd` → `/home/user/level0`
-- `ls -la` : binaire `level0` présent, **setuid level1** (`rwsr-x---+`), taille 747441 octets.
+- `ls -la`: binary `level0` present, **setuid level1** (`rwsr-x---+`), size 747441 bytes.
 
-**Étape 2 — file level0**
+**Step 2 — file level0**
 - setuid ELF 32-bit LSB executable, Intel 80386, **statically linked**, not stripped.
 
-**Étape 3 — strings**
-- Sur la VM utilisée, `strings` a retourné exit 126 (commande absente ou non exécutable). À faire manuellement si disponible, ou analyser le binaire en local après copie.
+**Step 3 — strings**
+- On the VM used, `strings` returned exit 126 (command absent or not executable). Do manually if available, or analyze the binary locally after copying.
 
-**Étape 4 — readelf -h**
+**Step 4 — readelf -h**
 - ELF32, Intel 80386, entry point `0x8048de8`, 5 program headers, 33 section headers.
 
-**Étape 5 — readelf -s**
-- Binaire non strié, statiquement linké (nombreux symboles). Notables :
-  - `main` @ `0x08048ec0` (199 octets)
+**Step 5 — readelf -s**
+- Binary not stripped, statically linked (many symbols). Notable:
+  - `main` @ `0x08048ec0` (199 bytes)
   - `strcpy`, `execv`, `sscanf`, `printf`, `fprintf`, `fgets_unlocked`, etc.
 
 ---
 
 ---
 
-## Extraction du binaire (analyse locale)
+## Binary extraction (local analysis)
 
-Depuis la machine hôte (où le projet est cloné) :
+From the host machine (where the project is cloned):
 
 ```bash
 cd level0
 sshpass -p 'level0' scp -o StrictHostKeyChecking=no -P 4242 level0@localhost:level0 ./level0.bin
 ```
 
-**But :** Récupérer une copie du binaire pour l’analyser en local (file, strings, readelf, objdump). Le fichier `level0.bin` est ignoré par git (ne pas versionner les binaires).
+**Goal:** Get a copy of the binary for local analysis (file, strings, readelf, objdump). The `level0.bin` file is git-ignored (do not version binaries).
 
 ---
 
-## Analyse locale (dans ./level0)
+## Local analysis (in ./level0)
 
 ```bash
 file level0.bin
@@ -124,7 +124,7 @@ objdump -d level0.bin | sed -n '/08048ec0 <main>/,/^[0-9a-f]* <[^>]*>:/p'
 objdump -s -j .rodata level0.bin
 ```
 
-**Résultats :** Voir `analysis.md`.
+**Results:** See `analysis.md`.
 
 ---
 
@@ -132,39 +132,39 @@ objdump -s -j .rodata level0.bin
 
 ## Exploitation
 
-### Étape 6 — Lancer le binaire avec l’argument magique
+### Step 6 — Run the binary with the magic argument
 
 ```bash
 ./level0 423
 ```
 
-**But :** Passer le test `atoi(argv[1]) == 0x1a7` pour que le programme exécute `execv("/bin/sh", ...)` avec l’euid level1. Un shell level1 s’ouvre.
+**Goal:** Pass the `atoi(argv[1]) == 0x1a7` check so the program executes `execv("/bin/sh", ...)` with euid level1. A level1 shell opens.
 
-### Étape 7 — Vérifier l’identité et récupérer le mot de passe level1
+### Step 7 — Verify identity and retrieve the level1 password
 
-Dans le shell obtenu :
+In the obtained shell:
 
 ```bash
 id
 cat /etc/passwd
-# ou selon le sujet : fichier dans le home level1 contenant le mot de passe
+# or as indicated by the subject: file in the level1 home containing the password
 ls -la /home/user/level1
 cat /home/user/level1/.pass
 ```
 
-**But :** Confirmer qu’on est level1 (`id`) et récupérer le mot de passe pour `ssh level1@... -p 4242`.
+**Goal:** Confirm we are level1 (`id`) and retrieve the password for `ssh level1@... -p 4242`.
 
-### Étape 8 — Se connecter en level1
+### Step 8 — Connect as level1
 
 ```bash
 exit
 ssh level1@localhost -p 4242
 ```
 
-**But :** Passer au level1 avec le mot de passe récupéré. Consigner le mot de passe dans `level0/flag` (ou dans les notes) pour l’évaluation.
+**Goal:** Move to level1 with the retrieved password. Record the password in `level0/flag` (or in notes) for evaluation.
 
 ---
 
 ## Next investigation step
 
-Pour les levels suivants : même démarche (recon → analyse du binaire → hypothèse → exploitation → récupération du mot de passe suivant).
+For the following levels: same approach (recon → binary analysis → hypothesis → exploitation → retrieve the next password).

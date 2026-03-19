@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Level0: backdoor — affiche la commande avec la valeur magique (0x1a7 = 423)."""
+"""Level0: backdoor — prints the command with the magic value (0x1a7 = 423)."""
 
-# Valeur trouvée en désassemblant main : cmp $0x1a7,%eax
-MAGIC = 0x1A7  # 423 en décimal
+# Value found by disassembling main: cmp $0x1a7,%eax
+MAGIC = 0x1A7  # 423 in decimal
 
 def main():
     cmd = f"./level0 {MAGIC}"

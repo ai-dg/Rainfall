@@ -1,11 +1,11 @@
 # Shellcode (level2)
 
 ## Concept
-Code machine injecté dans le buffer (ex. execve("/bin/sh")). Comme le binaire refuse un ret direct vers la stack, on retourne d’abord vers un gadget qui saute au buffer.
+Machine code injected into the buffer (e.g. execve("/bin/sh")). Since the binary refuses a direct ret to the stack, we first return to a gadget that jumps to the buffer.
 
-## Lien avec level2
-- Shellcode au **début** du payload ; sans octet NUL (gets s’arrête au \n). Classique i386 execve("/bin/sh") ~25–30 octets.
-- Adresse du buffer trouvée en GDB (ex. 0xbffff6c0) ; à mettre deux fois après le gadget (pour pop puis ret).
+## Relation to level2
+- Shellcode at the **start** of the payload; no NUL byte (gets stops at \n). Classic i386 execve("/bin/sh") ~25–30 bytes.
+- Buffer address found in GDB (e.g. 0xbffff6c0); put twice after the gadget (for pop then ret).
 
-## Références
-- `execve(2)` : https://man7.org/linux/man-pages/man2/execve.2.html
+## References
+- `execve(2)`: https://man7.org/linux/man-pages/man2/execve.2.html

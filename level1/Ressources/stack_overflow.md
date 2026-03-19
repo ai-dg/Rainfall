@@ -1,36 +1,36 @@
-# Buffer overflow sur la stack (ret2win)
+# Stack buffer overflow (ret2win)
 
 ## Concept
-Un **buffer overflow** sur la stack permet d’écraser les données situées après le buffer : saved EBP puis **adresse de retour**. En plaçant l’adresse d’une fonction cible (ex. `run` qui appelle system("/bin/sh")), le `ret` de la fonction vulnérable saute vers cette fonction au lieu de revenir à l’appelant.
+A **stack buffer overflow** allows overwriting data located after the buffer: saved EBP then the **return address**. By placing the address of a target function (e.g. `run` which calls system("/bin/sh")), the `ret` of the vulnerable function jumps to that function instead of returning to the caller.
 
-## Définition simple
-- `gets(buffer)` (ou lecture non bornée) remplit le buffer puis **déborde**.
-- Les octets en trop écrasent saved EBP (4 octets) puis l’**adresse de retour** (4 octets). Au `ret`, le CPU charge cette adresse dans EIP → on contrôle le flux.
+## Simple definition
+- `gets(buffer)` (or unbounded read) fills the buffer then **overflows**.
+- The extra bytes overwrite saved EBP (4 bytes) then the **return address** (4 bytes). At `ret`, the CPU loads this address into EIP → we control the flow.
 
-## Où ça apparaît (level1)
-- `main` : buffer (64 octets à esp+0x10), puis `gets(buffer)`. Pas de borne → overflow.
-- **Offset** jusqu’à l’adresse de retour : 76 octets sur RainFall (buffer + padding + saved EBP). Les 4 octets suivants = nouvelle adresse de retour.
-- Cible : fonction **run** (0x08048444) qui fait system("/bin/sh").
+## Where it appears (level1)
+- `main`: buffer (64 bytes at esp+0x10), then `gets(buffer)`. No bound → overflow.
+- **Offset** to the return address: 76 bytes on RainFall (buffer + padding + saved EBP). The next 4 bytes = new return address.
+- Target: function **run** (0x08048444) which calls system("/bin/sh").
 
-## Schéma (stack)
+## Stack diagram
 
 ```
   low addr   +------------------+
-             | buffer (64 B)    |  ← gets() remplit ici
+             | buffer (64 B)    |  ← gets() fills here
              +------------------+
              | padding / EBP    |
              +------------------+
-             | saved EIP (ret) |  ← on écrit ici l’adresse de run
+             | saved EIP (ret)  |  ← we write run's address here
              +------------------+
   high addr
 ```
 
 ## Exploit
-- Payload : 76 octets (padding) + adresse de `run` en little-endian (`\x44\x84\x04\x08`).
-- Invocation : `( python -c 'print "A"*76 + "\x44\x84\x04\x08"'; cat ) | ./level1` pour garder stdin ouvert.
+- Payload: 76 bytes (padding) + address of `run` in little-endian (`\x44\x84\x04\x08`).
+- Invocation: `( python -c 'print "A"*76 + "\x44\x84\x04\x08"'; cat ) | ./level1` to keep stdin open.
 
-## Résumé mental
-Overflow stack → écraser l’adresse de retour → au ret on saute vers une fonction du binaire (ret2win). Pas de shellcode.
+## Mental summary
+Stack overflow → overwrite the return address → at ret we jump to a function in the binary (ret2win). No shellcode.
 
-## Références
-- `gets(3)` (déprécié, non borné) : https://man7.org/linux/man-pages/man3/gets.3.html
+## References
+- `gets(3)` (deprecated, unbounded): https://man7.org/linux/man-pages/man3/gets.3.html

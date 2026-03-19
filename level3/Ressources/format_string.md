@@ -1,15 +1,15 @@
-# Format string — écriture en variable globale (level3)
+# Format string — writing to a global variable (level3)
 
 ## Concept
-`printf(buffer)` avec buffer contrôlé → **format string**. On met l’adresse de la cible (variable globale `m`) au début du buffer ; `%k$n` écrit le nombre d’octets déjà imprimés à cette adresse.
+`printf(buffer)` with a controlled buffer → **format string**. We put the address of the target (global variable `m`) at the start of the buffer; `%k$n` writes the number of bytes already printed to that address.
 
-## Où ça apparaît (level3)
-- `v()` : fgets puis printf(buffer). Variable **m** @ 0x804988c ; si **m == 64** → system("/bin/sh").
-- **Index** : le 1er argument de printf = notre buffer → **%1$n** écrit à l’adresse contenue au début du buffer.
-- Payload : [4 octets = 0x804988c] + "%60x" + "%1$n" → total imprimé = 64 → m = 64.
+## Where it appears (level3)
+- `v()`: fgets then printf(buffer). Variable **m** @ 0x804988c; if **m == 64** → system("/bin/sh").
+- **Index**: the 1st argument of printf = our buffer → **%1$n** writes to the address stored at the start of the buffer.
+- Payload: [4 bytes = 0x804988c] + "%60x" + "%1$n" → total printed = 64 → m = 64.
 
-## Résumé mental
-Format string pour écrire une **valeur** (64) à une **adresse** (m). %1$n = écrire à l’argument 1 (notre buffer).
+## Mental summary
+Format string to write a **value** (64) to an **address** (m). %1$n = write to argument 1 (our buffer).
 
-## Références
-- `printf(3)` (%n) : https://man7.org/linux/man-pages/man3/printf.3.html
+## References
+- `printf(3)` (%n): https://man7.org/linux/man-pages/man3/printf.3.html

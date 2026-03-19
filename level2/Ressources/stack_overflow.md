@@ -1,18 +1,18 @@
-# Buffer overflow et contrainte sur ret (level2)
+# Buffer overflow with ret constraint (level2)
 
 ## Concept
-Même idée que level1 (overflow via gets), mais le binaire **refuse** que l’adresse de retour soit dans la plage 0xb0000000–0xbfffffff (stack). Un test du type `(ret & 0xb0000000) == 0xb0000000` provoque un exit si on retourne directement vers le buffer (shellcode).
+Same idea as level1 (overflow via gets), but the binary **refuses** a return address in the range 0xb0000000–0xbfffffff (stack). A check of the form `(ret & 0xb0000000) == 0xb0000000` causes an exit if we return directly to the buffer (shellcode).
 
-## Définition simple
-- On ne peut pas mettre l’adresse du buffer (0xb...) en adresse de retour.
-- **Solution :** retourner vers un **gadget** dans le binaire (ex. `pop; ret`). Le gadget consomme un ou deux mots de la stack ; on y met l’adresse du buffer. Le `ret` du gadget saute alors vers le buffer → exécution du shellcode.
+## Simple definition
+- We cannot put the buffer address (0xb...) as the return address.
+- **Solution:** return to a **gadget** in the binary (e.g. `pop; ret`). The gadget consumes one or two words from the stack; we put the buffer address there. The gadget's `ret` then jumps to the buffer → shellcode execution.
 
-## Où ça apparaît (level2)
-- Fonction `p()` : gets(buffer), buffer à ebp-0x4c. **Offset** jusqu’à ret = 80 octets.
-- Gadget typique : **0x08048385** (`pop ebx; ret`). En retournant ici : pop consomme le 1er mot (adresse buffer), ret saute au 2e mot (encore adresse buffer) → shellcode.
+## Where it appears (level2)
+- Function `p()`: gets(buffer), buffer at ebp-0x4c. **Offset** to ret = 80 bytes.
+- Typical gadget: **0x08048385** (`pop ebx; ret`). By returning here: pop consumes the 1st word (buffer address), ret jumps to the 2nd word (also buffer address) → shellcode.
 
-## Résumé mental
-Contrainte sur ret → on utilise un gadget en .text pour faire un second saut vers la stack (buffer).
+## Mental summary
+Ret constraint → use a gadget in .text to make a second jump to the stack (buffer).
 
-## Références
-- `gets(3)` : https://man7.org/linux/man-pages/man3/gets.3.html
+## References
+- `gets(3)`: https://man7.org/linux/man-pages/man3/gets.3.html

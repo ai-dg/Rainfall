@@ -1,45 +1,45 @@
 # Level2 - Exam Notes
 
 ## 1. Objective
-Obtenir un shell level3. Binaire setuid level3 ; pas de system dans le flux normal. Il faut exécuter du shellcode (ex. execve("/bin/sh")).
+Get a level3 shell. The binary is setuid level3; no system in the normal flow. You need to execute shellcode (e.g. execve("/bin/sh")).
 
 ## 2. Initial diagnosis (before GDB)
-- **Fonctions suspectes :** `gets` dans `p()` ; pas de system. Buffer à ebp-0x4c, lecture de l’adresse de retour puis test `(ret & 0xb0000000) == 0xb0000000` → si oui, exit. Donc pas de retour direct vers la stack (adresses 0xb...).
-- **Entrée utilisateur :** tout ce que gets lit dans le buffer ; sans limite.
-- **Succès :** exécuter du shellcode (ex. execve("/bin/sh")) ; le shellcode doit être dans le buffer, mais on ne peut pas mettre 0xb... en ret. Il faut un gadget (ex. pop; ret) pour faire un second saut vers le buffer.
-- **Hypothèse :** buffer overflow ; retour vers un gadget dans le binaire, puis deux mots = adresse du buffer pour que le ret du gadget saute au buffer (shellcode).
+- **Suspicious functions:** `gets` in `p()`; no system. Buffer at ebp-0x4c, reads the return address then checks `(ret & 0xb0000000) == 0xb0000000` → if true, exit. So no direct return to the stack (0xb... addresses).
+- **User input:** everything that gets reads into the buffer; no bound.
+- **Success:** execute shellcode (e.g. execve("/bin/sh")); the shellcode must be in the buffer, but we can't put 0xb... as the ret. A gadget is needed (e.g. pop; ret) to make a second jump into the buffer.
+- **Hypothesis:** buffer overflow; return to a gadget in the binary, then two words = buffer address so that the gadget's ret jumps to the buffer (shellcode).
 
 ## 3. GDB diagnosis (how the vulnerability was found)
-- **Où break :** dans `p`, après gets (ou avant le ret de p). But : mesurer l’offset et confirmer le gadget.
-- **Layout stack :** buffer à `ebp-0x4c` → 76 octets jusqu’à saved EBP, +4 = **80 octets** jusqu’à l’adresse de retour. `x/24wx $ebp-0x4c` pour voir buffer, EBP, ret.
-- **Offset :** 80 octets (calculé : 0x4c + 4). Vérification : envoyer 80 octets + 0x42424242 ; segfault en 0x42424242 confirme.
-- **Gadget :** dans le binaire, chercher `pop reg; ret` (ex. objdump -d | grep -A1 pop). **0x08048385** : `pop ebx; ret`. En retournant ici : le pop consomme le premier mot (on met l’adresse du buffer), le ret saute au deuxième mot (encore l’adresse du buffer) → exécution du code au début du buffer.
-- **Adresse du buffer :** sans ASLR (VM 32b), après avoir envoyé une entrée, `info frame` ou `x/s $esp` ; adresse typique **0xbffff6c0** (sinon 0xbffff660, 0xbffff710). À noter pour le payload.
-- **Contrôle du flux :** payload = [shellcode][padding jusqu’à 80][0x08048385][addr_buf][addr_buf]. Au ret de p → gadget ; pop consomme addr_buf ; ret saute à addr_buf → shellcode.
+- **Where to break:** in `p`, after gets (or before p's ret). Goal: measure the offset and confirm the gadget.
+- **Stack layout:** buffer at `ebp-0x4c` → 76 bytes to saved EBP, +4 = **80 bytes** to the return address. `x/24wx $ebp-0x4c` to see buffer, EBP, ret.
+- **Offset:** 80 bytes (calculated: 0x4c + 4). Verification: send 80 bytes + 0x42424242; segfault at 0x42424242 confirms.
+- **Gadget:** in the binary, look for `pop reg; ret` (e.g. objdump -d | grep -A1 pop). **0x08048385**: `pop ebx; ret`. By returning here: pop consumes the first word (we put the buffer address), ret jumps to the second word (also the buffer address) → execution of code at the start of the buffer.
+- **Buffer address:** without ASLR (32-bit VM), after sending an input, `info frame` or `x/s $esp`; typical address **0xbffff6c0** (otherwise 0xbffff660, 0xbffff710). Note it for the payload.
+- **Flow control:** payload = [shellcode][padding to 80][0x08048385][buf_addr][buf_addr]. At p's ret → gadget; pop consumes buf_addr; ret jumps to buf_addr → shellcode.
 
 ## 4. Building the exploit command
-- **Cible :** après 80 octets, écraser l’adresse de retour par le gadget 0x08048385 ; puis deux mots = adresse du buffer (shellcode).
-- **Structure :** [shellcode ~25–30 octets][padding pour total 80][\x85\x83\x04\x08][addr_buf LE][addr_buf LE]. Shellcode execve("/bin/sh") sans NUL ni \n.
-- **Encodage :** adresses en LE. Buffer ex. 0xbffff6c0 → `\xc0\xf6\xff\xbf`. Python pour shellcode + padding + adresses.
-- **Invocation :** stdin ; garder le shell ouvert : `( python -c '...'; cat ) | ./level2`. Adresse du buffer à adapter selon GDB (x/s environ ou adresse du buffer après entrée).
-- **Référence commands.md :** commande finale dans `commands.md`, section « Exploitation ». Les valeurs 80, 0x08048385 et l’adresse du buffer viennent du diagnostic GDB.
+- **Target:** after 80 bytes, overwrite the return address with gadget 0x08048385; then two words = buffer address (shellcode).
+- **Structure:** [shellcode ~25–30 bytes][padding to total 80][\x85\x83\x04\x08][buf_addr LE][buf_addr LE]. execve("/bin/sh") shellcode without NUL or \n.
+- **Encoding:** addresses in LE. Buffer e.g. 0xbffff6c0 → `\xc0\xf6\xff\xbf`. Python for shellcode + padding + addresses.
+- **Invocation:** stdin; keep the shell open: `( python -c '...'; cat ) | ./level2`. Buffer address to adjust based on GDB (environ x/s or buffer address after input).
+- **Reference commands.md:** final command in `commands.md`, section "Exploitation". The values 80, 0x08048385, and the buffer address come from GDB diagnosis.
 
 ## 5. Exploitation logic
-Overflow via gets() ; contrainte : ret ne doit pas être 0xb... (sinon exit). On retourne vers un gadget pop; ret ; on met deux fois l’adresse du buffer pour que le ret du gadget saute au buffer ; au début du buffer, shellcode → shell.
+Overflow via gets(); constraint: ret must not be 0xb... (otherwise exit). We return to a pop; ret gadget; we put the buffer address twice so that the gadget's ret jumps to the buffer; at the start of the buffer, shellcode → shell.
 
 ## 6. Reproducible procedure (for evaluation)
-- **Commande :** selon `commands.md` (Exploitation), avec l’adresse buffer trouvée en GDB. Ex. : `( python -c 'print "<shellcode>" + "A"*(80-len(shellcode)) + "\x85\x83\x04\x08" + "\xc0\xf6\xff\xbf"*2'; cat ) | ./level2`.
-- **Résultat attendu :** shell level3. Puis `cat /home/user/level3/.pass`.
-- **À dire :** « gets() overflow. Le programme refuse une ret en 0xb..., donc je retourne vers un gadget pop;ret et je mets deux fois l’adresse du buffer pour sauter au shellcode. »
+- **Command:** as per `commands.md` (Exploitation), with the buffer address found in GDB. E.g.: `( python -c 'print "<shellcode>" + "A"*(80-len(shellcode)) + "\x85\x83\x04\x08" + "\xc0\xf6\xff\xbf"*2'; cat ) | ./level2`.
+- **Expected result:** level3 shell. Then `cat /home/user/level3/.pass`.
+- **What to say:** "gets() overflow. The program rejects a ret at 0xb..., so I return to a pop;ret gadget and put the buffer address twice to jump to the shellcode."
 
 ## 7. Oral defense points
-- **Bug :** gets() dans p() sans limite ; overflow sur la stack.
-- **Contrainte :** ret & 0xb0000000 → exit ; pas de retour direct au buffer.
-- **GDB :** offset 80, gadget 0x08048385, adresse du buffer (ex. 0xbffff6c0).
-- **Fix :** remplacer gets par fgets avec taille bornée.
+- **Bug:** gets() in p() without a bound; stack overflow.
+- **Constraint:** ret & 0xb0000000 → exit; no direct return to the buffer.
+- **GDB:** offset 80, gadget 0x08048385, buffer address (e.g. 0xbffff6c0).
+- **Fix:** replace gets with fgets with a bounded size.
 
 ## 8. Common evaluator questions
-- **Pourquoi un gadget ?** L’adresse du buffer est 0xb... ; le programme quitte si ret dans cette plage. Le gadget est en 0x08... ; le ret du gadget lit la prochaine valeur sur la stack (notre adresse buffer) et y saute.
-- **Que fait le gadget ?** pop consomme un mot (on met l’adresse buffer), ret saute au mot suivant (encore l’adresse buffer) → exécution du buffer.
-- **Comment trouves-tu l’adresse du buffer ?** En GDB, après avoir envoyé une entrée, regarder l’adresse du buffer (info frame, x $esp) ; VM 32b sans ASLR donne une adresse stable (ex. 0xbffff6c0).
-- **Shellcode sans NUL ?** gets s’arrête au \n ; et un NUL couperait strdup/affichage ; un shellcode classique sans NUL évite les coupures.
+- **Why a gadget?** The buffer address is 0xb...; the program exits if ret is in that range. The gadget is at 0x08...; the gadget's ret reads the next value on the stack (our buffer address) and jumps there.
+- **What does the gadget do?** pop consumes one word (we put the buffer address), ret jumps to the next word (also the buffer address) → buffer execution.
+- **How do you find the buffer address?** In GDB, after sending an input, look at the buffer address (info frame, x $esp); 32-bit VM without ASLR gives a stable address (e.g. 0xbffff6c0).
+- **Shellcode without NUL?** gets stops at \n; and a NUL would cut strdup/display; a classic shellcode without NUL avoids truncation.
