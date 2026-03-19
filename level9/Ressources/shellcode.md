@@ -1,5 +1,7 @@
 # Shellcode (level9)
 
+**Voir aussi :** `shellcode_pas_a_pas.md` pour la **conversion pas à pas** : de l’appel execve("/bin/sh") à la suite d’octets `\xeb\x1f\x5e...` (asm → assembleur → octets → Python).
+
 ## Concept
 Un **shellcode** est du code machine injecté (souvent un petit exécutable qui lance un shell, ex. execve("/bin/sh")). Comme le binaire level9 n’a pas `system` ni "/bin/sh", on doit exécuter notre propre code.
 
@@ -24,7 +26,8 @@ Un **shellcode** est du code machine injecté (souvent un petit exécutable qui 
 ```
 
 ## Exemple (shellcode i386 classique)
-- Octets : `\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07...` + "/bin/sh".
+- Octets : `\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07\x89\x46\x0c\xb0\x0b\x89\xf3\x8d\x4e\x08\x8d\x56\x0c\xcd\x80\x31\xdb\x89\xd8\x40\xcd\x80\xe8\xdc\xff\xff\xff` + `"/bin/sh"`.
+- Ces octets viennent de l’assembleur execve("/bin/sh") en position-independent (jmp/call/pop). **Conversion pas à pas** : voir `shellcode_pas_a_pas.md`.
 - Utilisé dans la variable d’environnement ; adresse trouvée en GDB (ex. 0xbffffc63) → mise en little-endian au début du payload argv[1].
 
 ## Résumé mental

