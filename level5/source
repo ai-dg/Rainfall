@@ -16,7 +16,7 @@ void o(void)
 
 void n(void)
 {
-	char buf[512];
+	char buf[520];
 
 	fgets(buf, 512, stdin);
 	printf(buf);  /* format string */

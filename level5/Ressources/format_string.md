@@ -19,6 +19,8 @@ In `n()`: `printf(buffer);` — no fixed string, so `buffer` is the format strin
 | %k$n | Write the number of bytes printed to the address in the k-th argument |
 | %nx  | Print an integer in hex in n characters (padding) |
 
+
+
 ## Why it's useful
 - **Read:** find the buffer **index** on the stack (send `AAAA` + `%1$p.%2$p.%3$p.%4$p` → the one that prints `0x41414141` is our buffer).
 - **Write:** put the GOT address at the start of the buffer, then `%padding x%k$n` to write the desired value to that address.

