@@ -38,7 +38,7 @@ High address
 ├───────────────┤
 │ .bss          │
 │ .data         │
-│ .got          │  ← GOT here
+│ .got          │  ← GOT here, ELF (Executable and Linkable Format) memory
 │ .plt          │
 ├───────────────┤
 │ Code (.text)  │

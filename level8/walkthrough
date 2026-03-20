@@ -56,9 +56,6 @@ scp -P 4242 level8@localhost:level8 ./level8.bin
 
 ## 6. Exploit design and command explanation
 
-**Command generation (converter.py):**
-`level8/Ressources/converter.py` prints the sequence (auth / service + padding / login) and the piped command. The number of 'A' after "service" (32 by default) is configurable if the heap layout changes.
-
 **Design:** No return address overwrite. The program reads *(auth+0x20); this address is on the heap after the auth block. A **service** allocation (strdup) can be adjacent to auth; auth+0x20 then falls in the service buffer. By sending a long string after "service" we put a non-zero byte at that offset; login gives the shell.
 
 **Command / sequence:**

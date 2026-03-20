@@ -262,3 +262,4 @@ if (strlen(argv[1]) < 64)
 
 - `strcpy(3)` (unbounded): https://man7.org/linux/man-pages/man3/strcpy.3.html
 - Glibc malloc internals: https://sourceware.org/glibc/wiki/MallocInternals
+- Overflow: https://koor.fr/C/cstring/strcpy.wp

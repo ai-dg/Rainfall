@@ -190,6 +190,20 @@ typedef struct s_n {
 [ b->value : 4 bytes ]
 ```
 
+```
+a = 0x0804a008
+
+0x0804a008  [ a->vptr          ] 4
+0x0804a00c  [ a->annotation    ] 100
+0x0804a070  [ a->value         ] 4
+
+0x0804a074  [ heap metadata    ] 4
+
+0x0804a078  [ b->vptr          ] 4
+0x0804a07c  [ b->annotation    ] 100
+0x0804a0e0  [ b->value         ] 4
+```
+
 So:
 
 ```
@@ -269,7 +283,7 @@ Command:
 
 ## NOP sled
 
-**NOP sled** : [NOP slide (Wikipedia)](https://en.wikipedia.org/wiki/NOP_slide)
+**NOP sled** : [NOP (No operation) slide (Wikipedia)](https://en.wikipedia.org/wiki/NOP_slide)
 
 Séquence d’instructions NOP (`\x90` on x86) placed **before** the shellcode. An imprecise jump into this region still hits the shellcode.
 
@@ -373,3 +387,9 @@ this->annotation[n] = '\0';
 ```
 
 "Never copy more than 100 bytes."
+
+## References
+- memory problem memcapy https://koor.fr/C/cstring/memcpy.wp
+- https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/
+- https://phrack.org/issues/66/10
+- https://sourceware.org/git/?p=glibc.git;a=blob;f=malloc/malloc.c
