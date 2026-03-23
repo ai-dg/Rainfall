@@ -26,19 +26,8 @@ Get a level2 shell. The binary is setuid/setgid level2; the `run` function execu
 ## 5. Exploitation logic
 Buffer overflow via gets(): no bound. We overwrite saved EBP then the return address with the address of run. At the ret of main, the flow jumps to run() → system("/bin/sh") with euid level2.
 
-## 6. Reproducible procedure (for evaluation)
+## 6. Reproducible procedure 
 - **Command:** `( python -c 'print "A"*76 + "\x44\x84\x04\x08"'; cat ) | ./level1` then `cat /home/user/level2/.pass`.
 - **Expected result:** "Good... Wait what?" then a level2 shell.
-- **What to say:** "gets() reads without a bound. I measured the offset to the return address in GDB (76 on the VM). I overwrite the ret with the address of run to call system("/bin/sh")."
+gets() reads without a bound. I measured the offset to the return address in GDB (76 on the VM). I overwrite the ret with the address of run to call system("/bin/sh").
 
-## 7. Oral defense points
-- **Bug:** gets(buffer) without a bound in a 64-byte buffer (main, buffer at esp+0x10).
-- **GDB:** confirms offset 76 (or 72/80), address of run 0x08048444, and that at ret we jump to run.
-- **Payload:** 76 bytes + address of run in LE; no shellcode.
-- **Fix:** replace gets with fgets(buffer, sizeof(buffer), stdin).
-
-## 8. Common evaluator questions
-- **Why 76 and not 68?** 68 = 0x54-0x10 (theoretical). On the Rainfall VM the alignment gives 76; verify in GDB with a test payload.
-- **Why run?** It's the only function that calls system("/bin/sh") and is never reached in the normal flow.
-- **What does cat do?** Keeps stdin open so the shell stays interactive.
-- **Where is the buffer?** At esp+0x10 in the main frame (64 bytes).

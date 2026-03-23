@@ -14,7 +14,7 @@ void run(void)
 
 int main(void)
 {
-	char buf[64];  /* à esp+0x10, frame 0x50 → ret à +68 */
+	char buf[76];  /* à esp+0x10, frame 0x50 → ret à +68 */
 
 	gets(buf);
 	return 0;

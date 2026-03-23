@@ -61,9 +61,6 @@ scp -P 4242 level7@localhost:level7 ./level7.bin
 
 ## 6. Exploit design and command explanation
 
-**Command generation (converter.py):**
-`level7/Ressources/converter.py` takes the offset (20), puts GOT address (0x8049928) and **m** address (0x080484f4) and prints the final command.
-
 **Design:** Arbitrary write: by overflowing ptr1[1] we overwrite ptr2[1]. The second strcpy writes argv[2] to the address we put in ptr2[1]. We choose **GOT puts** as destination and **address of m** as value → puts("~~") calls m() which displays c.
 
 ```bash

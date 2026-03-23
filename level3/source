@@ -13,7 +13,7 @@ void v(void)
 
 	fgets(buf, 512, stdin);
 	printf(buf);  /* format string : entrée contrôlée */
-	if (m == 0x40) {
+	if (m == 0x40) { /* 64 bits*/
 		fwrite("Wait what?!\n", 1, 12, stdout);
 		system("/bin/sh");
 	}

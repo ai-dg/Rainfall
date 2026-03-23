@@ -27,9 +27,9 @@ No memory corruption; diagnosis relies on static analysis (objdump/readelf) plus
 ## 5. Exploitation logic
 No memory exploit: backdoor. The binary compares atoi(argv[1]) to 0x1a7; if equal, it launches /bin/sh with level1 privileges. Providing 423 is sufficient.
 
-## 6. Reproducible procedure (for evaluation)
+## 6. Reproducible procedure
 - **Command:** `./level0 423` then in the shell: `id`, `cat /home/user/level1/.pass` (or path given by the subject).
 - **Expected result:** shell with euid level1, password displayed.
-- **What to say:** "The binary compares the argument to 0x1a7. I found this value by disassembling main. I run it with 423 to trigger execv("/bin/sh")."
+- The binary compares the argument to 0x1a7. I found this value by disassembling main. I run it with 423 to trigger execv("/bin/sh")."
 
 .

@@ -58,9 +58,6 @@ scp -P 4242 level6@localhost:level6 ./level6.bin
 
 ## 6. Exploit design and command explanation
 
-**Command generation (converter.py):**
-`level6/Ressources/converter.py` takes the offset (72 on RainFall) and the address of **n** (0x08048454) and prints the final command. Inputs: values found in GDB (section 5).
-
 **Design:** Heap overflow via strcpy; the target is not the stack but the **function pointer** stored right after the buffer. By overwriting it with the address of n(), the `call *ptr` instruction invokes n() → system("/bin/cat .../.pass").
 
 **Final command (see `commands.md`, Exploitation):**

