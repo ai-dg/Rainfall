@@ -192,13 +192,14 @@ typedef struct s_n {
 
 ```
 a = 0x0804a008
-
+[a]
 0x0804a008  [ a->vptr          ] 4
 0x0804a00c  [ a->annotation    ] 100
 0x0804a070  [ a->value         ] 4
 
-0x0804a074  [ heap metadata    ] 4
+0x0804a074  [ heap metadata    ] 8
 
+[b]
 0x0804a078  [ b->vptr          ] 4
 0x0804a07c  [ b->annotation    ] 100
 0x0804a0e0  [ b->value         ] 4
