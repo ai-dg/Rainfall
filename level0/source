@@ -1,6 +1,6 @@
 /*
- * Reconstruction du binaire level0 (Rainfall).
- * Logique : si argv[1] == 423 (0x1a7), lance /bin/sh avec euid/egid effectifs (setuid).
+ * Reconstructed level0 binary (Rainfall).
+ * Logic: if argv[1] == 423 (0x1a7), exec /bin/sh with effective euid/egid (setuid).
  */
 
 #include <unistd.h>
@@ -23,7 +23,7 @@ int main(int argc, char **argv)
 	setresuid(euid, euid, euid);
 
 	execv("/bin/sh", (char *[]){ sh, NULL });
-	/* unreachable si execv réussit */
+	/* unreachable if execv succeeds */
 	return 0;
 
 fail:

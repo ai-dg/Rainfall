@@ -1,6 +1,6 @@
 /*
- * Reconstruction level2 (Rainfall).
- * p() : gets(buffer) puis vérifie que l'adresse de retour n'est pas sur la stack (0xb0...).
+ * Reconstructed level2 (Rainfall).
+ * p(): gets(buffer) then checks the return address is not on the stack (0xb0...).
  */
 
 #include <stdio.h>
