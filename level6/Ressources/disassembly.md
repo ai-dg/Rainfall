@@ -28,7 +28,7 @@ Dump of assembler code for function main:
    0x0804847c <+0>:     push   %ebp               ---> Prologue.
    0x0804847d <+1>:     mov    %esp,%ebp          ---> Frame for main().
    0x0804847f <+3>:     and    $0xfffffff0,%esp   ---> Align stack to 16 bytes.
-   0x08048482 <+6>:     sub    $0x20,%esp         ---> Locals: two pointers + padding.
+   0x08048482 <+6>:     sub    $0x20,%esp         ---> Locals: two pointers + padding.z
    0x08048485 <+9>:     movl   $0x40,(%esp)       ---> malloc(0x40) — 64 bytes for first chunk.
    0x0804848c <+16>:    call   0x8048350 <malloc@plt>  ---> Allocate buffer 1.
    0x08048491 <+21>:    mov    %eax,0x1c(%esp)    ---> Store pointer at esp+0x1c (first chunk).
