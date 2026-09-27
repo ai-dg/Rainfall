@@ -4,12 +4,12 @@ This project is an introduction to the exploitation of (elf-like) binary
 
 
 Stackoverflow
-Hypeoverflow
+Heap overflow
 Bufferoverflow
 GOT
-les exploitations de print
-save uip
-EVP
+Format string
+Saved EIP
+EBP
 ESP
 Canary
 EAX
